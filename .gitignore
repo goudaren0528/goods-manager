@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+alipay_user_data/
+goods_data_backup_*.xlsx
