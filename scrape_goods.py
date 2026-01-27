@@ -1,5 +1,6 @@
 import time
 import os
+import re
 import pandas as pd
 import openpyxl
 from datetime import datetime
@@ -185,7 +186,6 @@ def run_scraping():
                     # 尝试强制跳转到下一页URL (如果能推测出规律)
                     # 通常 URL 里有 page=X 参数
                     if "page=" in page.url:
-                        import re
                         new_url = re.sub(r'page=\d+', f'page={page_num+1}', page.url)
                         print(f"尝试强制跳转到: {new_url}")
                         try:
@@ -354,9 +354,26 @@ def run_scraping():
     
     # 排序 remaining_cols
     def sort_key(col_name):
+        # 1. 优先处理 "X天租金" 列，按天数数值排序
+        rent_match = re.match(r"(\d+)天租金", col_name)
+        if rent_match:
+            days = int(rent_match.group(1))
+            return (1, days)
+        
+        # 2. 处理特定已知列，固定顺序
+        priority_cols = ["编号", "库存"]
+        if col_name in priority_cols:
+             return (0, priority_cols.index(col_name))
+             
+        post_cols = ["市场价", "押金", "购买价", "采购价"]
+        if col_name in post_cols:
+            return (2, post_cols.index(col_name))
+        
+        # 3. 其他列回退到 master_sku_headers 顺序
         if col_name in master_sku_headers:
-            return master_sku_headers.index(col_name)
-        return 9999
+            return (3, master_sku_headers.index(col_name))
+            
+        return (4, col_name)
         
     remaining_cols.sort(key=sort_key)
     
