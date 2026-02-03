@@ -58,6 +58,16 @@ export default function Home() {
     setLoading(false);
   };
 
+  const filteredGoods = goods.filter(g => {
+    if (!searchTerm) return true;
+    const lower = searchTerm.toLowerCase();
+    return (
+        (g.ID && g.ID.toLowerCase().includes(lower)) ||
+        (g.商品名称 && g.商品名称.toLowerCase().includes(lower)) ||
+        (g.SKU && g.SKU.toLowerCase().includes(lower))
+    );
+  });
+
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
       // 选中过滤后的所有商品
@@ -86,19 +96,6 @@ export default function Home() {
     const ids = Array.from(selectedIds).join(",");
     router.push(`/workbench?ids=${ids}`);
   };
-
-  // 获取所有可能的列名（除了ID）
-  const columns = goods.length > 0 ? Object.keys(goods[0]).filter(k => k !== "ID") : [];
-
-  const filteredGoods = goods.filter(g => {
-    if (!searchTerm) return true;
-    const lower = searchTerm.toLowerCase();
-    return (
-        (g.ID && g.ID.toLowerCase().includes(lower)) ||
-        (g.商品名称 && g.商品名称.toLowerCase().includes(lower)) ||
-        (g.SKU && g.SKU.toLowerCase().includes(lower))
-    );
-  });
 
   return (
     <div className="container mx-auto p-4 space-y-4">
@@ -181,37 +178,6 @@ export default function Home() {
           </CardContent>
         </Card>
       </div>
-
-      {/* 编辑弹窗 */}
-      <Dialog open={isEditing} onOpenChange={setIsEditing}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>批量编辑 {selectedIds.size} 个商品</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <p className="text-sm text-gray-500">
-              提示：只填写需要修改的字段，留空则保持原值。
-            </p>
-            <div className="grid grid-cols-2 gap-4">
-                {/* 动态渲染常用字段表单 */}
-                {["商品名称", "短标题", "库存", "SKU", "1天租金", "30天租金", "押金"].map(field => (
-                    <div key={field} className="grid gap-2">
-                        <Label>{field}</Label>
-                        <Input 
-                            placeholder={`保持原值`}
-                            onChange={(e) => setEditForm({...editForm, [field]: e.target.value})}
-                        />
-                    </div>
-                ))}
-            </div>
-            {/* 可以添加一个 Textarea 来输入 JSON 格式的高级编辑 */}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditing(false)}>取消</Button>
-            <Button onClick={saveEdit}>保存并准备更新</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
