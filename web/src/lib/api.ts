@@ -5,7 +5,7 @@ export interface Goods {
   短标题?: string;
   SKU?: string;
   库存?: number;
-  [key: string]: any; // 允许动态字段
+  [key: string]: unknown;
 }
 
 export const API_BASE = "http://127.0.0.1:8000";
@@ -17,7 +17,7 @@ export async function fetchGoods(): Promise<Goods[]> {
   return res.json();
 }
 
-export const runScrape = async (): Promise<any> => {
+export const runScrape = async (): Promise<Record<string, unknown>> => {
   const res = await fetch(`${API_BASE}/run-scrape`, {
     method: "POST",
   });
@@ -27,7 +27,7 @@ export const runScrape = async (): Promise<any> => {
   return res.json();
 };
 
-export const prepareUpdate = async (items: Partial<Goods>[]): Promise<any> => {
+export const prepareUpdate = async (items: Partial<Goods>[]): Promise<Record<string, unknown>> => {
   const res = await fetch(`${API_BASE}/prepare-update`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -51,7 +51,7 @@ export const fetchLogs = async (): Promise<{ logs: string }> => {
   return res.json();
 };
 
-export const fetchTaskStatus = async (): Promise<{ running: boolean; task_name: string | null; message: string }> => {
+export const fetchTaskStatus = async (): Promise<{ running: boolean; task_name: string | null; message: string; progress: number }> => {
   const res = await fetch(`${API_BASE}/task-status`);
   if (!res.ok) {
     throw new Error("Failed to fetch task status");

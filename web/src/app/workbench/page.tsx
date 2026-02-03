@@ -130,7 +130,7 @@ export default function Workbench() {
                       {allCols.map(col => (
                         <TableCell key={col} className="p-1">
                           {col === "ID" ? (
-                            <span className="pl-3 text-muted-foreground">{item[col as keyof Goods]}</span>
+                            <span className="pl-3 text-muted-foreground">{String(item[col as keyof Goods] ?? "")}</span>
                           ) : (
                             <Input 
                               value={String(item[col as keyof Goods] || "")}

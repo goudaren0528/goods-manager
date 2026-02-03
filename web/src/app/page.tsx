@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
@@ -16,41 +17,52 @@ export default function Home() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false); // 本地加载状态 (表格)
   const [searchTerm, setSearchTerm] = useState("");
-  const [taskStatus, setTaskStatus] = useState<{ running: boolean; task_name: string | null }>({ running: false, task_name: null });
+  const [taskStatus, setTaskStatus] = useState<{ running: boolean; task_name: string | null; message: string; progress: number }>({
+    running: false,
+    task_name: null,
+    message: "Idle",
+    progress: 0
+  });
 
-  useEffect(() => {
-    loadData();
-    
-    // 轮询任务状态
-    const pollStatus = async () => {
-        try {
-            const status = await fetchTaskStatus();
-            setTaskStatus(status);
-        } catch (e) {}
-    };
-    pollStatus(); // 立即执行一次
-    const interval = setInterval(pollStatus, 2000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadData = async () => {
+  const loadData = async (suppressToast = false) => {
     setLoading(true);
     try {
       const data = await fetchGoods();
       setGoods(data);
     } catch (e) {
-      toast.error("加载数据失败: " + String(e));
+      if (!suppressToast) toast.error("加载数据失败: " + String(e));
     }
     setLoading(false);
   };
 
+  useEffect(() => {
+    const pollStatus = async () => {
+      try {
+        const status = await fetchTaskStatus();
+        setTaskStatus(status);
+        return status;
+      } catch (e) {
+        return null;
+      }
+    };
+
+    const init = async () => {
+      const status = await pollStatus();
+      await loadData(!!status?.running);
+    };
+    init();
+
+    const interval = setInterval(pollStatus, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
   const handleSync = async () => {
     try {
       await runScrape();
-      toast.success("抓取任务已启动，请在“任务日志”页面查看进度");
+      toast.success("抓取任务已启动，请在日志中查看进度");
       // 触发一次状态更新
-      setTaskStatus({ running: true, task_name: "scrape" });
-      router.push("/logs");
+      setTaskStatus({ running: true, task_name: "scrape", message: "Starting scrape task...", progress: 0 });
+      // 不再强制跳转到 logs 页面，保持在列表页并显示进度
     } catch (e) {
       toast.error("启动失败: " + String(e));
     }
@@ -124,6 +136,15 @@ export default function Home() {
           </Button>
         </div>
       </div>
+
+      {taskStatus.running && (
+        <div className="w-full flex items-center gap-2 px-1">
+            <span className="text-sm text-muted-foreground whitespace-nowrap">
+                任务运行中 ({taskStatus.progress}%): {taskStatus.message}
+            </span>
+            <Progress value={taskStatus.progress} className="h-2 flex-1" />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4">
         {/* 商品表格区域 */}

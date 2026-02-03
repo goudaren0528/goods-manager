@@ -5,24 +5,17 @@ import { fetchLogs, fetchTaskStatus } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { Loader2 } from "lucide-react";
 
 export default function LogsPage() {
   const [logs, setLogs] = useState("");
-  const [status, setStatus] = useState<{ running: boolean; task_name: string | null; message: string }>({
+  const [status, setStatus] = useState<{ running: boolean; task_name: string | null; message: string; progress: number }>({
     running: false,
     task_name: null,
-    message: "Idle"
+    message: "Idle",
+    progress: 0
   });
-
-  useEffect(() => {
-    // 立即加载一次
-    loadData();
-    
-    // 轮询
-    const interval = setInterval(loadData, 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   const loadData = async () => {
     try {
@@ -32,25 +25,47 @@ export default function LogsPage() {
       ]);
       setLogs(logRes.logs);
       setStatus(statusRes);
-    } catch (e) {
-      // ignore errors during poll
+    } catch {
     }
   };
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      void loadData();
+    }, 0);
+
+    const interval = setInterval(() => {
+      void loadData();
+    }, 1000);
+
+    return () => {
+      clearTimeout(timeout);
+      clearInterval(interval);
+    };
+  }, []);
 
   return (
     <div className="container mx-auto p-4 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">自动化任务日志</h1>
-        <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">当前状态:</span>
-            {status.running ? (
-                <Badge variant="default" className="bg-blue-600 flex items-center gap-1">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    运行中 ({status.task_name})
-                </Badge>
-            ) : (
-                <Badge variant="secondary">空闲</Badge>
+        <div className="flex items-center gap-4">
+            {status.running && (
+                <div className="flex items-center gap-2 min-w-[200px]">
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">{status.progress}%</span>
+                    <Progress value={status.progress} className="h-2 w-32" />
+                </div>
             )}
+            <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">当前状态:</span>
+                {status.running ? (
+                    <Badge variant="default" className="bg-blue-600 flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        运行中 ({status.task_name})
+                    </Badge>
+                ) : (
+                    <Badge variant="secondary">空闲</Badge>
+                )}
+            </div>
         </div>
       </div>
       

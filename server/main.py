@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import pandas as pd
+import numpy as np
 import sqlite3
 from typing import List, Optional, Any
 import os
@@ -63,7 +64,7 @@ def get_goods():
     conn = sqlite3.connect(DB_PATH)
     try:
         df = pd.read_sql_query("SELECT * FROM goods", conn)
-        # Replace NaN with None (which becomes null in JSON) to avoid JSON errors
+        df = df.replace([np.inf, -np.inf], np.nan)
         df = df.where(pd.notnull(df), None)
         return df.to_dict(orient="records")
     except Exception as e:
@@ -85,51 +86,97 @@ def sync_from_excel():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+import re
+
 # Global task status tracker
 TASK_STATUS = {
     "running": False,
     "task_name": None,
-    "message": "Idle"
+    "message": "Idle",
+    "progress": 0
 }
 
-def update_task_status(running: bool, name: str = None, message: str = "Idle"):
+def update_task_status(running: bool, name: str = None, message: str = "Idle", progress: int = 0):
     TASK_STATUS["running"] = running
     TASK_STATUS["task_name"] = name
     TASK_STATUS["message"] = message
+    TASK_STATUS["progress"] = progress
+
+def run_process_with_logging(cmd, cwd, log_file, task_type):
+    """
+    运行子进程并实时记录日志，同时解析进度
+    """
+    try:
+        # 使用 line buffering
+        with open(log_file, "w", encoding="utf-8", buffering=1) as f:
+            # Windows下有时候编码需要注意，这里尝试 utf-8
+            process = subprocess.Popen(
+                cmd, 
+                cwd=cwd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, # 将 stderr 合并到 stdout
+                text=True, 
+                encoding="utf-8",
+                bufsize=1 # Line buffered
+            )
+            
+            for line in process.stdout:
+                f.write(line)
+                # f.flush() # buffering=1 should handle this for text files usually, but explicit flush is safer
+                
+                # Update status
+                clean_line = line.strip()
+                if clean_line:
+                    current_progress = TASK_STATUS.get("progress", 0)
+                    
+                    if task_type in ["scrape", "update"]:
+                        match = re.search(r'\[(\d+)/(\d+)\]', clean_line)
+                        if match:
+                            try:
+                                current = int(match.group(1))
+                                total = int(match.group(2))
+                                if total > 0:
+                                    current_progress = int((current / total) * 100)
+                            except:
+                                pass
+                    
+                    update_task_status(True, task_type, clean_line, current_progress)
+        
+        process.wait()
+        return process.returncode
+        
+    except Exception as e:
+        update_task_status(False, None, f"Process execution error: {str(e)}", 0)
+        return -1
 
 def run_scrape_task():
     """Background task for scraping"""
     try:
-        update_task_status(True, "scrape", "Scraping data...")
+        update_task_status(True, "scrape", "Starting scrape task...", 0)
         script_path = os.path.abspath("../scrape_goods.py")
         work_dir = os.path.abspath("..")
+        log_path = "../task.log"
         
-        result = subprocess.run(
-            ["python", script_path], 
-            cwd=work_dir, 
-            capture_output=True, 
-            text=True,
-            encoding="utf-8"
+        returncode = run_process_with_logging(
+            ["python", "-u", script_path], # -u for unbuffered python output
+            work_dir, 
+            log_path, 
+            "scrape"
         )
         
-        # Log handling
-        with open("../scrape.log", "w", encoding="utf-8") as f:
-            f.write(result.stdout)
-            if result.stderr:
-                f.write("\n=== STDERR ===\n")
-                f.write(result.stderr)
-        
-        if result.returncode != 0:
-            update_task_status(False, None, f"Scrape failed: {result.stderr[:50]}")
+        if returncode != 0:
+            update_task_status(False, None, "Scrape failed. Check logs.", 0)
             return
 
         # Upsert logic
         files = glob.glob(os.path.join(work_dir, "scrape_goods_data_*.xlsx"))
         if not files:
-            update_task_status(False, None, "No output file found")
+            update_task_status(False, None, "No output file found", 0)
             return
             
         latest_file = max(files, key=os.path.getctime)
+        update_task_status(True, "scrape", f"Syncing data from {os.path.basename(latest_file)}...", 99)
+        
         conn = sqlite3.connect(DB_PATH)
         try:
             new_df = pd.read_excel(latest_file)
@@ -159,43 +206,40 @@ def run_scrape_task():
                     final_df = final_df.drop(columns=["_key"])
             
             final_df.to_sql("goods", conn, if_exists="replace", index=False)
-            update_task_status(False, None, "Scrape completed successfully")
+            update_task_status(False, None, "Scrape completed successfully", 100)
         finally:
             conn.close()
             
     except Exception as e:
-        update_task_status(False, None, f"Error: {str(e)}")
+        update_task_status(False, None, f"Error: {str(e)}", 0)
 
 def run_update_task():
     """Background task for updating goods"""
     try:
-        update_task_status(True, "update", "Updating goods...")
+        update_task_status(True, "update", "Starting update task...", 0)
         script_path = os.path.abspath("../update_goods.py")
         work_dir = os.path.abspath("..")
+        log_path = "../scrape.log" # Reusing same log file or append to it
         
-        result = subprocess.run(
-            ["python", script_path], 
-            cwd=work_dir, 
-            capture_output=True, 
-            text=True,
-            encoding="utf-8"
+        # Append to log instead of overwrite for update task? 
+        # But run_process_with_logging uses "w". Let's use a separate log or append mode.
+        # Ideally, we should just use "w" for a fresh task log.
+        
+        returncode = run_process_with_logging(
+            ["python", "-u", script_path], 
+            work_dir, 
+            log_path, 
+            "update"
         )
-        
-        # Append logs
-        with open("../scrape.log", "a", encoding="utf-8") as f:
-            f.write("\n\n=== UPDATE TASK ===\n")
-            f.write(result.stdout)
-            if result.stderr:
-                f.write("\n=== STDERR ===\n")
-                f.write(result.stderr)
                 
-        if result.returncode != 0:
-             update_task_status(False, None, f"Update failed: {result.stderr[:50]}")
+        if returncode != 0:
+             update_task_status(False, None, "Update failed. Check logs.", 0)
         else:
-             update_task_status(False, None, "Update completed successfully")
+             update_task_status(False, None, "Update completed successfully", 100)
              
     except Exception as e:
-        update_task_status(False, None, f"Error: {str(e)}")
+        update_task_status(False, None, f"Error: {str(e)}", 0)
+
 
 @app.get("/task-status")
 def get_task_status():
