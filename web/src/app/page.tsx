@@ -1,31 +1,33 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Goods, fetchGoods, syncFromExcel, prepareUpdate, triggerUpdate, fetchLogs, API_BASE, EXPORT_URL } from "@/lib/api";
+import { Goods, fetchGoods, runScrape, fetchLogs, API_BASE, EXPORT_URL } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
+import { Loader2 } from "lucide-react";
 
 export default function Home() {
+  const router = useRouter();
   const [goods, setGoods] = useState<Goods[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [isEditing, setIsEditing] = useState(false);
-  const [editForm, setEditForm] = useState<Partial<Goods>>({});
   const [logs, setLogs] = useState("");
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadLogs, 2000);
-    return () => clearInterval(interval);
-  }, []);
+    // 只有在加载中才轮询日志
+    if (loading) {
+        const interval = setInterval(loadLogs, 2000);
+        return () => clearInterval(interval);
+    }
+  }, [loading]);
 
   const loadData = async () => {
     try {
@@ -45,19 +47,21 @@ export default function Home() {
 
   const handleSync = async () => {
     setLoading(true);
+    setLogs("正在启动抓取任务...");
     try {
-      await syncFromExcel();
+      await runScrape();
       await loadData();
-      toast.success("数据同步成功");
+      toast.success("数据更新成功");
     } catch (e) {
-      toast.error("同步失败");
+      toast.error("更新失败: " + String(e));
     }
     setLoading(false);
   };
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedIds(new Set(goods.map((g) => g.ID)));
+      // 选中过滤后的所有商品
+      setSelectedIds(new Set(filteredGoods.map((g) => g.ID)));
     } else {
       setSelectedIds(new Set());
     }
@@ -78,36 +82,9 @@ export default function Home() {
       toast.warning("请先选择商品");
       return;
     }
-    // 这里简单处理：如果是批量编辑，只允许编辑公共字段，或者如果是单选，编辑所有字段
-    // 为了演示，我们假设只编辑第一个选中的商品作为模板，或者这一步是“批量设置”
-    // 实际业务中可能需要更复杂的逻辑。
-    // 这里我们简化为：如果选了多个，就弹出一个空表单，填了哪个字段就更新哪个字段到所有选中项。
-    setEditForm({});
-    setIsEditing(true);
-  };
-
-  const saveEdit = async () => {
-    // 构建要更新的数据列表
-    const updates = goods
-      .filter((g) => selectedIds.has(g.ID))
-      .map((g) => ({
-        ...g,
-        ...editForm, // 覆盖修改的字段
-      }));
-
-    try {
-      await prepareUpdate(updates);
-      toast.success(`已准备 ${updates.length} 条更新数据`);
-      setIsEditing(false);
-      
-      // 询问是否立即执行
-      if (confirm("数据已准备就绪，是否立即运行自动化脚本更新到支付宝？")) {
-          await triggerUpdate();
-          toast.info("自动化脚本已启动，请查看日志");
-      }
-    } catch (e) {
-      toast.error("保存失败");
-    }
+    // 跳转到工作台
+    const ids = Array.from(selectedIds).join(",");
+    router.push(`/workbench?ids=${ids}`);
   };
 
   // 获取所有可能的列名（除了ID）
@@ -138,10 +115,11 @@ export default function Home() {
             导出 Excel
           </Button>
           <Button variant="outline" onClick={handleSync} disabled={loading}>
-            从 Excel 同步
+            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            更新商品数据 (抓取)
           </Button>
           <Button onClick={startEdit} disabled={selectedIds.size === 0}>
-            批量编辑 ({selectedIds.size})
+            进入修改工作台 ({selectedIds.size})
           </Button>
         </div>
       </div>
@@ -160,8 +138,8 @@ export default function Home() {
                   />
                 </TableHead>
                 <TableHead>ID</TableHead>
-                <TableHead>商品名称</TableHead>
                 <TableHead>SKU</TableHead>
+                <TableHead>商品名称</TableHead>
                 <TableHead>库存</TableHead>
                 {/* 更多列可以在这里动态渲染，但为了性能和宽度，暂时只显示关键列 */}
               </TableRow>
@@ -172,8 +150,8 @@ export default function Home() {
                       <TableCell colSpan={5} className="text-center h-24">暂无数据</TableCell>
                   </TableRow>
               ) : (
-                filteredGoods.map((g) => (
-                <TableRow key={g.ID}>
+                filteredGoods.map((g, idx) => (
+                <TableRow key={`${g.ID}-${g.SKU || idx}`}>
                   <TableCell>
                     <Checkbox
                       checked={selectedIds.has(g.ID)}
@@ -181,8 +159,8 @@ export default function Home() {
                     />
                   </TableCell>
                   <TableCell>{g.ID}</TableCell>
+                  <TableCell className="max-w-[150px] truncate" title={g.SKU}>{g.SKU}</TableCell>
                   <TableCell className="max-w-[200px] truncate" title={g.商品名称}>{g.商品名称}</TableCell>
-                  <TableCell>{g.SKU}</TableCell>
                   <TableCell>{g.库存}</TableCell>
                 </TableRow>
               )))}

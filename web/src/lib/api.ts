@@ -17,12 +17,17 @@ export async function fetchGoods(): Promise<Goods[]> {
   return res.json();
 }
 
-export async function syncFromExcel() {
-  const res = await fetch(`${API_BASE}/sync-from-excel`);
+export const runScrape = async (): Promise<any> => {
+  const res = await fetch(`${API_BASE}/run-scrape`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    throw new Error("Failed to run scrape");
+  }
   return res.json();
-}
+};
 
-export async function prepareUpdate(items: Goods[]) {
+export const prepareUpdate = async (items: Partial<Goods>[]): Promise<any> => {
   const res = await fetch(`${API_BASE}/prepare-update`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

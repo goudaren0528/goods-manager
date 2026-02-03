@@ -79,23 +79,127 @@ def sync_from_excel():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-class UpdateRequest(BaseModel):
-    items: List[dict] # 包含要更新的行数据
+@app.post("/run-scrape")
+def run_scrape():
+    """
+    运行 scrape_goods.py 抓取数据，并 Upsert 到数据库
+    """
+    import subprocess
+    import glob
+    
+    try:
+        # 1. 运行抓取脚本
+        script_path = os.path.abspath("../scrape_goods.py")
+        work_dir = os.path.abspath("..")
+        
+        # 使用 subprocess.run 阻塞等待完成，因为我们需要立刻读取结果
+        # 注意：抓取可能耗时较长，生产环境应使用异步任务队列 (Celery/RQ)
+        # 这里为了简单闭环，我们先用阻塞，前端会有 Loading 状态
+        result = subprocess.run(
+            ["python", script_path], 
+            cwd=work_dir, 
+            capture_output=True, 
+            text=True,
+            encoding="utf-8"  # 尝试 utf-8
+        )
+        
+        # 记录日志
+        with open("../scrape.log", "w", encoding="utf-8") as f:
+            f.write(result.stdout)
+            if result.stderr:
+                f.write("\n=== STDERR ===\n")
+                f.write(result.stderr)
+        
+        if result.returncode != 0:
+             raise HTTPException(status_code=500, detail=f"Scraping script failed. Check logs. Stderr: {result.stderr[:200]}")
+
+        # 2. 找到最新的 scrape_goods_data_*.xlsx
+        files = glob.glob(os.path.join(work_dir, "scrape_goods_data_*.xlsx"))
+        if not files:
+            return {"status": "warning", "message": "Script ran but no output file found."}
+            
+        latest_file = max(files, key=os.path.getctime)
+        
+        # 3. 读取 Excel 并 Upsert 到 SQLite
+        # 逻辑：读取 DB -> 读取 Excel -> Merge (Excel 覆盖 DB) -> Write DB
+        conn = sqlite3.connect(DB_PATH)
+        
+        try:
+            # 读取新数据
+            new_df = pd.read_excel(latest_file)
+            # 确保 ID 是字符串
+            if "ID" in new_df.columns:
+                new_df["ID"] = new_df["ID"].astype(str)
+            
+            # 读取旧数据
+            try:
+                old_df = pd.read_sql_query("SELECT * FROM goods", conn)
+                if "ID" in old_df.columns:
+                    old_df["ID"] = old_df["ID"].astype(str)
+            except:
+                # 表可能不存在
+                old_df = pd.DataFrame()
+            
+            if old_df.empty:
+                final_df = new_df
+            else:
+                # Upsert 逻辑
+                # 假设 ID + SKU 是唯一键。
+                # 如果没有 SKU 列，仅用 ID。
+                # 为了通用性，我们构造一个 unique_key
+                
+                def make_key(df):
+                    if "SKU" in df.columns:
+                        return df["ID"].astype(str) + "_" + df["SKU"].astype(str).fillna("")
+                    return df["ID"].astype(str)
+                
+                # 设置索引以便更新
+                new_df["_key"] = make_key(new_df)
+                old_df["_key"] = make_key(old_df)
+                
+                # 过滤掉 old_df 中那些 key 在 new_df 里已经存在的行 (我们要用新的覆盖旧的)
+                old_df_filtered = old_df[~old_df["_key"].isin(new_df["_key"])]
+                
+                # 合并
+                final_df = pd.concat([old_df_filtered, new_df], ignore_index=True)
+                
+                # 移除临时 key
+                if "_key" in final_df.columns:
+                    final_df = final_df.drop(columns=["_key"])
+            
+            # 写入 DB (Replace 模式)
+            final_df.to_sql("goods", conn, if_exists="replace", index=False)
+            
+            return {"status": "success", "message": f"Synced {len(new_df)} records from {os.path.basename(latest_file)}"}
+            
+        finally:
+            conn.close()
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/prepare-update")
-def prepare_update(data: UpdateRequest):
+def prepare_update(items: list[dict]):
     """
-    接收前端编辑的数据，写入 update_goods_data.xlsx，
-    供 update_goods.py 使用
+    接收前端传来的商品列表（行级数据），生成 update_goods_data.xlsx
     """
     try:
-        if not data.items:
-            return {"status": "empty"}
+        if not items:
+            return {"status": "warning", "message": "No items provided"}
             
-        df = pd.DataFrame(data.items)
-        # 写入 Excel
-        df.to_excel(UPDATE_EXCEL_PATH, index=False)
-        return {"status": "success", "file": UPDATE_EXCEL_PATH}
+        df = pd.DataFrame(items)
+        
+        # 确保保存路径在项目根目录，供 update_goods.py 读取
+        save_path = os.path.abspath("../update_goods_data.xlsx")
+        
+        # 简单的列排序优化，确保 ID 在前
+        cols = list(df.columns)
+        if "ID" in cols:
+            cols.insert(0, cols.pop(cols.index("ID")))
+        df = df[cols]
+        
+        df.to_excel(save_path, index=False)
+        return {"status": "success", "count": len(df), "path": save_path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

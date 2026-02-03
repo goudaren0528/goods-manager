@@ -47,17 +47,6 @@ const data = {
         },
       ],
     },
-    {
-      title: "自动化",
-      url: "#",
-      icon: Bot,
-      items: [
-        {
-          title: "任务日志",
-          url: "#", // 以后可以做一个专门的日志页面
-        },
-      ],
-    },
   ],
   navSecondary: [
     {
