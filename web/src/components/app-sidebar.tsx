@@ -32,7 +32,7 @@ const data = {
   user: {
     name: "Admin",
     email: "admin@example.com",
-    avatar: "/avatars/shadcn.jpg",
+    avatar: "",
   },
   navMain: [
     {
@@ -45,10 +45,6 @@ const data = {
           title: "商品列表",
           url: "/",
         },
-        {
-          title: "数据同步",
-          url: "#",
-        },
       ],
     },
     {
@@ -58,11 +54,7 @@ const data = {
       items: [
         {
           title: "任务日志",
-          url: "#",
-        },
-        {
-          title: "配置设置",
-          url: "#",
+          url: "#", // 以后可以做一个专门的日志页面
         },
       ],
     },
@@ -72,11 +64,6 @@ const data = {
       title: "帮助文档",
       url: "#",
       icon: LifeBuoy,
-    },
-    {
-      title: "反馈",
-      url: "#",
-      icon: Send,
     },
   ],
 }

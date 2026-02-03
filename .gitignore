@@ -5,3 +5,5 @@ goods_data_backup_*.xlsx
 goods.db
 scrape_goods_data_*.xlsx
 my-app/
+venv/
+server/venv/

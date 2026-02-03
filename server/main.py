@@ -61,6 +61,8 @@ def get_goods():
     # 动态读取所有列
     df = pd.read_sql_query("SELECT * FROM goods", conn)
     conn.close()
+    # Replace NaN with None for JSON compatibility
+    df = df.where(pd.notnull(df), None)
     return df.to_dict(orient="records")
 
 @app.get("/sync-from-excel")

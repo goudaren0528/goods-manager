@@ -19,6 +19,7 @@ export default function Home() {
   const [editForm, setEditForm] = useState<Partial<Goods>>({});
   const [logs, setLogs] = useState("");
   const [loading, setLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
     loadData();
@@ -112,11 +113,27 @@ export default function Home() {
   // 获取所有可能的列名（除了ID）
   const columns = goods.length > 0 ? Object.keys(goods[0]).filter(k => k !== "ID") : [];
 
+  const filteredGoods = goods.filter(g => {
+    if (!searchTerm) return true;
+    const lower = searchTerm.toLowerCase();
+    return (
+        (g.ID && g.ID.toLowerCase().includes(lower)) ||
+        (g.商品名称 && g.商品名称.toLowerCase().includes(lower)) ||
+        (g.SKU && g.SKU.toLowerCase().includes(lower))
+    );
+  });
+
   return (
     <div className="container mx-auto p-4 space-y-4">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-4 md:flex-row md:justify-between md:items-center">
         <h1 className="text-2xl font-bold">支付宝商品管理</h1>
-        <div className="space-x-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
+            <Input 
+                placeholder="搜索 ID / 名称 / SKU..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full sm:w-[250px]"
+            />
           <Button variant="outline" onClick={() => window.open(EXPORT_URL, "_blank")}>
             导出 Excel
           </Button>
@@ -129,16 +146,16 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* 商品表格区域 */}
-        <div className="md:col-span-2 border rounded-md overflow-hidden">
+        <div className="lg:col-span-2 border rounded-md overflow-hidden bg-white dark:bg-zinc-950">
             <div className="max-h-[600px] overflow-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[50px]">
                   <Checkbox
-                    checked={goods.length > 0 && selectedIds.size === goods.length}
+                    checked={filteredGoods.length > 0 && selectedIds.size === filteredGoods.length}
                     onCheckedChange={(c) => handleSelectAll(!!c)}
                   />
                 </TableHead>
@@ -150,7 +167,12 @@ export default function Home() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {goods.map((g) => (
+              {filteredGoods.length === 0 ? (
+                  <TableRow>
+                      <TableCell colSpan={5} className="text-center h-24">暂无数据</TableCell>
+                  </TableRow>
+              ) : (
+                filteredGoods.map((g) => (
                 <TableRow key={g.ID}>
                   <TableCell>
                     <Checkbox
@@ -163,7 +185,7 @@ export default function Home() {
                   <TableCell>{g.SKU}</TableCell>
                   <TableCell>{g.库存}</TableCell>
                 </TableRow>
-              ))}
+              )))}
             </TableBody>
           </Table>
           </div>
