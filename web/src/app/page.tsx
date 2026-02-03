@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Goods, fetchGoods, runScrape, fetchLogs, API_BASE, EXPORT_URL } from "@/lib/api";
+import { Goods, fetchGoods, runScrape, fetchTaskStatus, API_BASE, EXPORT_URL } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
@@ -16,47 +14,48 @@ export default function Home() {
   const router = useRouter();
   const [goods, setGoods] = useState<Goods[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [logs, setLogs] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false); // 本地加载状态 (表格)
   const [searchTerm, setSearchTerm] = useState("");
+  const [taskStatus, setTaskStatus] = useState<{ running: boolean; task_name: string | null }>({ running: false, task_name: null });
 
   useEffect(() => {
     loadData();
-    // 只有在加载中才轮询日志
-    if (loading) {
-        const interval = setInterval(loadLogs, 2000);
-        return () => clearInterval(interval);
-    }
-  }, [loading]);
+    
+    // 轮询任务状态
+    const pollStatus = async () => {
+        try {
+            const status = await fetchTaskStatus();
+            setTaskStatus(status);
+        } catch (e) {}
+    };
+    pollStatus(); // 立即执行一次
+    const interval = setInterval(pollStatus, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   const loadData = async () => {
+    setLoading(true);
     try {
       const data = await fetchGoods();
       setGoods(data);
     } catch (e) {
-      toast.error("加载数据失败");
-    }
-  };
-
-  const loadLogs = async () => {
-    try {
-      const res = await fetchLogs();
-      setLogs(res.logs);
-    } catch (e) {}
-  };
-
-  const handleSync = async () => {
-    setLoading(true);
-    setLogs("正在启动抓取任务...");
-    try {
-      await runScrape();
-      await loadData();
-      toast.success("数据更新成功");
-    } catch (e) {
-      toast.error("更新失败: " + String(e));
+      toast.error("加载数据失败: " + String(e));
     }
     setLoading(false);
   };
+
+  const handleSync = async () => {
+    try {
+      await runScrape();
+      toast.success("抓取任务已启动，请在“任务日志”页面查看进度");
+      // 触发一次状态更新
+      setTaskStatus({ running: true, task_name: "scrape" });
+      router.push("/logs");
+    } catch (e) {
+      toast.error("启动失败: " + String(e));
+    }
+  };
+
 
   const filteredGoods = goods.filter(g => {
     if (!searchTerm) return true;
@@ -111,20 +110,25 @@ export default function Home() {
           <Button variant="outline" onClick={() => window.open(EXPORT_URL, "_blank")}>
             导出 Excel
           </Button>
-          <Button variant="outline" onClick={handleSync} disabled={loading}>
-            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            更新商品数据 (抓取)
+          <Button 
+            variant="outline" 
+            onClick={handleSync} 
+            disabled={taskStatus.running}
+            className={taskStatus.running ? "opacity-50 cursor-not-allowed" : ""}
+          >
+            {taskStatus.running ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {taskStatus.running ? "后台任务运行中..." : "更新商品数据 (抓取)"}
           </Button>
-          <Button onClick={startEdit} disabled={selectedIds.size === 0}>
+          <Button onClick={startEdit} disabled={selectedIds.size === 0 || taskStatus.running}>
             进入修改工作台 ({selectedIds.size})
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4">
         {/* 商品表格区域 */}
-        <div className="lg:col-span-2 border rounded-md overflow-hidden bg-white dark:bg-zinc-950">
-            <div className="max-h-[600px] overflow-auto">
+        <div className="border rounded-md overflow-hidden bg-white dark:bg-zinc-950">
+            <div className="max-h-[calc(100vh-200px)] overflow-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -165,18 +169,6 @@ export default function Home() {
           </Table>
           </div>
         </div>
-
-        {/* 日志区域 */}
-        <Card className="h-[600px] flex flex-col">
-          <CardHeader>
-            <CardTitle>运行日志</CardTitle>
-          </CardHeader>
-          <CardContent className="flex-1 p-0 overflow-hidden">
-            <ScrollArea className="h-full p-4 bg-black text-white font-mono text-xs">
-              <pre className="whitespace-pre-wrap">{logs || "等待任务启动..."}</pre>
-            </ScrollArea>
-          </CardContent>
-        </Card>
       </div>
     </div>
   );

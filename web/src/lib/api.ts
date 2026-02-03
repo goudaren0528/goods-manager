@@ -43,7 +43,18 @@ export async function triggerUpdate() {
   return res.json();
 }
 
-export async function fetchLogs() {
+export const fetchLogs = async (): Promise<{ logs: string }> => {
   const res = await fetch(`${API_BASE}/logs`);
+  if (!res.ok) {
+    throw new Error("Failed to fetch logs");
+  }
   return res.json();
-}
+};
+
+export const fetchTaskStatus = async (): Promise<{ running: boolean; task_name: string | null; message: string }> => {
+  const res = await fetch(`${API_BASE}/task-status`);
+  if (!res.ok) {
+    throw new Error("Failed to fetch task status");
+  }
+  return res.json();
+};

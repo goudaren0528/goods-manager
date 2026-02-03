@@ -45,7 +45,7 @@ def main():
         print(f"启动浏览器 (UserData: {USER_DATA_DIR})...")
         context = p.chromium.launch_persistent_context(
             user_data_dir=USER_DATA_DIR,
-            headless=False,
+            headless=True,
             args=["--start-maximized"],
             no_viewport=True
         )

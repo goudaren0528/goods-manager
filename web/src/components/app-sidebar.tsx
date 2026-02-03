@@ -45,6 +45,10 @@ const data = {
           title: "商品列表",
           url: "/",
         },
+        {
+          title: "任务日志",
+          url: "/logs",
+        },
       ],
     },
   ],

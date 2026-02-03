@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -8,6 +8,9 @@ from typing import List, Optional, Any
 import os
 import shutil
 import json
+import subprocess
+import glob
+import logging
 
 app = FastAPI()
 
@@ -58,12 +61,15 @@ def read_root():
 @app.get("/goods")
 def get_goods():
     conn = sqlite3.connect(DB_PATH)
-    # 动态读取所有列
-    df = pd.read_sql_query("SELECT * FROM goods", conn)
-    conn.close()
-    # Replace NaN with None for JSON compatibility
-    df = df.where(pd.notnull(df), None)
-    return df.to_dict(orient="records")
+    try:
+        df = pd.read_sql_query("SELECT * FROM goods", conn)
+        # Replace NaN with None (which becomes null in JSON) to avoid JSON errors
+        df = df.where(pd.notnull(df), None)
+        return df.to_dict(orient="records")
+    except Exception as e:
+        return []
+    finally:
+        conn.close()
 
 @app.get("/sync-from-excel")
 def sync_from_excel():
@@ -79,31 +85,34 @@ def sync_from_excel():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@app.post("/run-scrape")
-def run_scrape():
-    """
-    运行 scrape_goods.py 抓取数据，并 Upsert 到数据库
-    """
-    import subprocess
-    import glob
-    
+# Global task status tracker
+TASK_STATUS = {
+    "running": False,
+    "task_name": None,
+    "message": "Idle"
+}
+
+def update_task_status(running: bool, name: str = None, message: str = "Idle"):
+    TASK_STATUS["running"] = running
+    TASK_STATUS["task_name"] = name
+    TASK_STATUS["message"] = message
+
+def run_scrape_task():
+    """Background task for scraping"""
     try:
-        # 1. 运行抓取脚本
+        update_task_status(True, "scrape", "Scraping data...")
         script_path = os.path.abspath("../scrape_goods.py")
         work_dir = os.path.abspath("..")
         
-        # 使用 subprocess.run 阻塞等待完成，因为我们需要立刻读取结果
-        # 注意：抓取可能耗时较长，生产环境应使用异步任务队列 (Celery/RQ)
-        # 这里为了简单闭环，我们先用阻塞，前端会有 Loading 状态
         result = subprocess.run(
             ["python", script_path], 
             cwd=work_dir, 
             capture_output=True, 
             text=True,
-            encoding="utf-8"  # 尝试 utf-8
+            encoding="utf-8"
         )
         
-        # 记录日志
+        # Log handling
         with open("../scrape.log", "w", encoding="utf-8") as f:
             f.write(result.stdout)
             if result.stderr:
@@ -111,72 +120,94 @@ def run_scrape():
                 f.write(result.stderr)
         
         if result.returncode != 0:
-             raise HTTPException(status_code=500, detail=f"Scraping script failed. Check logs. Stderr: {result.stderr[:200]}")
+            update_task_status(False, None, f"Scrape failed: {result.stderr[:50]}")
+            return
 
-        # 2. 找到最新的 scrape_goods_data_*.xlsx
+        # Upsert logic
         files = glob.glob(os.path.join(work_dir, "scrape_goods_data_*.xlsx"))
         if not files:
-            return {"status": "warning", "message": "Script ran but no output file found."}
+            update_task_status(False, None, "No output file found")
+            return
             
         latest_file = max(files, key=os.path.getctime)
-        
-        # 3. 读取 Excel 并 Upsert 到 SQLite
-        # 逻辑：读取 DB -> 读取 Excel -> Merge (Excel 覆盖 DB) -> Write DB
         conn = sqlite3.connect(DB_PATH)
-        
         try:
-            # 读取新数据
             new_df = pd.read_excel(latest_file)
-            # 确保 ID 是字符串
             if "ID" in new_df.columns:
                 new_df["ID"] = new_df["ID"].astype(str)
             
-            # 读取旧数据
             try:
                 old_df = pd.read_sql_query("SELECT * FROM goods", conn)
                 if "ID" in old_df.columns:
                     old_df["ID"] = old_df["ID"].astype(str)
             except:
-                # 表可能不存在
                 old_df = pd.DataFrame()
             
             if old_df.empty:
                 final_df = new_df
             else:
-                # Upsert 逻辑
-                # 假设 ID + SKU 是唯一键。
-                # 如果没有 SKU 列，仅用 ID。
-                # 为了通用性，我们构造一个 unique_key
-                
                 def make_key(df):
                     if "SKU" in df.columns:
                         return df["ID"].astype(str) + "_" + df["SKU"].astype(str).fillna("")
                     return df["ID"].astype(str)
                 
-                # 设置索引以便更新
                 new_df["_key"] = make_key(new_df)
                 old_df["_key"] = make_key(old_df)
-                
-                # 过滤掉 old_df 中那些 key 在 new_df 里已经存在的行 (我们要用新的覆盖旧的)
                 old_df_filtered = old_df[~old_df["_key"].isin(new_df["_key"])]
-                
-                # 合并
                 final_df = pd.concat([old_df_filtered, new_df], ignore_index=True)
-                
-                # 移除临时 key
                 if "_key" in final_df.columns:
                     final_df = final_df.drop(columns=["_key"])
             
-            # 写入 DB (Replace 模式)
             final_df.to_sql("goods", conn, if_exists="replace", index=False)
-            
-            return {"status": "success", "message": f"Synced {len(new_df)} records from {os.path.basename(latest_file)}"}
-            
+            update_task_status(False, None, "Scrape completed successfully")
         finally:
             conn.close()
-
+            
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        update_task_status(False, None, f"Error: {str(e)}")
+
+def run_update_task():
+    """Background task for updating goods"""
+    try:
+        update_task_status(True, "update", "Updating goods...")
+        script_path = os.path.abspath("../update_goods.py")
+        work_dir = os.path.abspath("..")
+        
+        result = subprocess.run(
+            ["python", script_path], 
+            cwd=work_dir, 
+            capture_output=True, 
+            text=True,
+            encoding="utf-8"
+        )
+        
+        # Append logs
+        with open("../scrape.log", "a", encoding="utf-8") as f:
+            f.write("\n\n=== UPDATE TASK ===\n")
+            f.write(result.stdout)
+            if result.stderr:
+                f.write("\n=== STDERR ===\n")
+                f.write(result.stderr)
+                
+        if result.returncode != 0:
+             update_task_status(False, None, f"Update failed: {result.stderr[:50]}")
+        else:
+             update_task_status(False, None, "Update completed successfully")
+             
+    except Exception as e:
+        update_task_status(False, None, f"Error: {str(e)}")
+
+@app.get("/task-status")
+def get_task_status():
+    return TASK_STATUS
+
+@app.post("/run-scrape")
+def run_scrape(background_tasks: BackgroundTasks):
+    if TASK_STATUS["running"]:
+        raise HTTPException(status_code=400, detail="A task is already running")
+    
+    background_tasks.add_task(run_scrape_task)
+    return {"status": "success", "message": "Scrape task started in background"}
 
 @app.post("/prepare-update")
 def prepare_update(items: list[dict]):
@@ -223,27 +254,12 @@ def export_excel():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/trigger-update")
-def trigger_update():
-    """
-    调用 update_goods.py 执行自动化更新
-    """
-    import subprocess
-    try:
-        # 异步或同步调用脚本
-        # 这里为了演示简单，使用 Popen
-        # 注意：生产环境建议使用 Celery 或 RQ
-        # 脚本路径需要绝对路径或相对路径正确
-        script_path = os.path.abspath("../update_goods.py")
-        work_dir = os.path.abspath("..")
+def trigger_update(background_tasks: BackgroundTasks):
+    if TASK_STATUS["running"]:
+        raise HTTPException(status_code=400, detail="A task is already running")
         
-        # 简单起见，我们假设这是阻塞调用，或者让它在后台跑
-        # 为了能看到输出，可以重定向 stdout
-        log_file = open("../update.log", "w")
-        subprocess.Popen(["python", script_path], cwd=work_dir, stdout=log_file, stderr=log_file)
-        
-        return {"status": "started", "log_file": "update.log"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    background_tasks.add_task(run_update_task)
+    return {"status": "success", "message": "Update task started in background"}
 
 @app.get("/logs")
 def get_logs():
