@@ -44,6 +44,14 @@ export default function LogsPage() {
     };
   }, []);
 
+  // Auto scroll to bottom whenever logs update
+  useEffect(() => {
+    const scrollContainer = document.querySelector('[data-radix-scroll-area-viewport]');
+    if (scrollContainer) {
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    }
+  }, [logs]);
+
   return (
     <div className="container mx-auto p-4 space-y-4">
       <div className="flex items-center justify-between">

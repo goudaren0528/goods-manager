@@ -4,12 +4,15 @@ import pandas as pd
 from playwright.sync_api import sync_playwright, TimeoutError
 import datetime
 
+import sys
+
 # 配置
 USERNAME = "伟填"
 PASSWORD = "Test0528."
 LOGIN_URL = "https://szguokuai.zlj.xyzulin.top/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods"
-DATA_FILE = "update_goods_data.xlsx" # 数据源文件
-HEADLESS = False
+# 默认数据文件，可以通过命令行参数覆盖
+DATA_FILE = sys.argv[1] if len(sys.argv) > 1 else "update_goods_data.xlsx"
+HEADLESS = True
 
 def log_update(message):
     """记录更新日志"""
@@ -675,7 +678,10 @@ def run_update():
     grouped = df.groupby("ID")
     print(f"共加载 {len(grouped)} 个商品待处理。")
 
-    with sync_playwright() as p:
+    p = None
+    browser = None
+    try:
+        p = sync_playwright().start()
         browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context()
         page = context.new_page()
@@ -879,7 +885,15 @@ def run_update():
                 import traceback
                 traceback.print_exc()
 
-        browser.close()
+    except Exception as e:
+        log_update(f"更新任务异常: {e}")
+    finally:
+        if browser:
+            try: browser.close()
+            except: pass
+        if p:
+            try: p.stop()
+            except: pass
         
     sync_goods_data(df)
 

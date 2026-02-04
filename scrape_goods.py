@@ -12,22 +12,9 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 USERNAME = "伟填"
 PASSWORD = "Test0528."
 LOGIN_URL = "https://szguokuai.zlj.xyzulin.top/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods"
-ID_RECORD_FILE = "processed_ids.txt"
 MAX_PAGES = 0  # 最大抓取页数，设置 0 为不限制（抓取所有页）
-HEADLESS = False
+HEADLESS = True
 OUTPUT_FILE = f"scrape_goods_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-FORCE_UPDATE = True # 是否强制更新（忽略已处理记录，重新抓取所有数据）
-
-def load_processed_ids():
-    if os.path.exists(ID_RECORD_FILE):
-        with open(ID_RECORD_FILE, "r", encoding="utf-8") as f:
-            return set(line.strip() for line in f if line.strip())
-    return set()
-
-def save_new_ids(new_ids):
-    with open(ID_RECORD_FILE, "a", encoding="utf-8") as f:
-        for gid in new_ids:
-            f.write(f"{gid}\n")
 
 def update_master_headers(master_headers, current_headers):
     """
@@ -44,20 +31,23 @@ def update_master_headers(master_headers, current_headers):
             last_index = insert_pos
 
 def run_scraping():
-    processed_ids = load_processed_ids()
-    if FORCE_UPDATE:
-        print("注意：强制更新模式已开启，将忽略历史记录重新抓取所有数据。")
-        processed_ids = set() # 清空内存中的记录，视为全部新增
-    else:
-        print(f"已加载 {len(processed_ids)} 个历史商品ID。")
+    print(f"启动抓取任务，HEADLESS={HEADLESS}，MAX_PAGES={MAX_PAGES}，全量同步模式")
     
     all_sku_rows = []
     master_sku_headers = [] # 用于记录所有SKU列的正确顺序
     
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+    p = None
+    browser = None
+    try:
+        print("正在启动 Playwright...")
+        p = sync_playwright().start()
+        print("启动 Chromium 浏览器...")
+        browser = p.chromium.launch(headless=HEADLESS)
+        print("创建上下文...")
         context = browser.new_context()
+        print("创建页面...")
         page = context.new_page()
+        print("浏览器上下文与页面已创建。")
         
         # --- 登录阶段 ---
         print(f"正在访问登录页面: {LOGIN_URL}")
@@ -106,10 +96,10 @@ def run_scraping():
         # --- 第一阶段：扫描列表页收集新ID ---
         print("\n=== 第一阶段：扫描列表页收集新ID ===")
         ids_to_process = []
+        processed_ids = set()
+        FORCE_UPDATE = True
+        scraped_sync_status = {}  # ID -> Sync Status
         page_num = 1
-        
-        # 如果开启强制更新，则不使用 processed_ids 进行过滤
-        filter_ids = set() if FORCE_UPDATE else processed_ids
         
         while True:
             if MAX_PAGES > 0 and page_num > MAX_PAGES:
@@ -133,21 +123,30 @@ def run_scraping():
                         goods_id = id_cell.inner_text().strip()
                         if goods_id.isdigit():
                             current_page_ids.append(goods_id)
+                            
+                            # 获取是否同步支付宝状态
+                            # selector: td:nth-child(13)
+                            try:
+                                status_cell = row.query_selector("td:nth-child(13)")
+                                if status_cell:
+                                    status_text = status_cell.inner_text().strip()
+                                    # 如果是“可售卖”就是已同步，否则是未同步
+                                    scraped_sync_status[goods_id] = "已同步" if status_text == "可售卖" else "未同步"
+                            except Exception as e:
+                                print(f"  获取同步状态失败 (ID: {goods_id}): {e}")
                 except:
                     pass
             
-            # 使用 filter_ids (根据 FORCE_UPDATE 决定是否为空)
-            new_ids_on_page = [gid for gid in current_page_ids if gid not in filter_ids and gid not in ids_to_process]
+            # 全量抓取，不进行过滤
+            new_ids_on_page = [gid for gid in current_page_ids if gid not in ids_to_process]
             
-            print(f"  - 第 {page_num} 页共 {len(current_page_ids)} 个ID，其中新增: {len(new_ids_on_page)} 个")
+            print(f"  - 第 {page_num} 页共 {len(current_page_ids)} 个ID")
             
             if new_ids_on_page:
                 ids_to_process.extend(new_ids_on_page)
-                # print(f"  - 已加入待抓取队列: {new_ids_on_page}") # 减少日志输出
             else:
                 if current_page_ids:
-                    print("  - 当前页未发现新ID，继续扫描...")
-                    # 移除 break 以支持全量扫描
+                    print("  - 当前页ID均已在队列中 (重复页?)，继续扫描...")
             
             user_next_selector = "ul.pagination > li > a[aria-label='Next']"
             next_btn = page.query_selector(user_next_selector)
@@ -292,6 +291,7 @@ def run_scraping():
                                     row_data["ID"] = goods_id
                                     row_data["商品名称"] = goods_name
                                     row_data["短标题"] = short_title
+                                    row_data["是否同步支付宝"] = scraped_sync_status.get(goods_id, "未知")
                                     row_data["1级分类"] = cate1
                                     row_data["2级分类"] = cate2
                                     row_data["3级分类"] = cate3
@@ -302,6 +302,7 @@ def run_scraping():
                                     "ID": goods_id,
                                     "商品名称": goods_name,
                                     "短标题": short_title,
+                                    "是否同步支付宝": scraped_sync_status.get(goods_id, "未知"),
                                     "1级分类": cate1,
                                     "2级分类": cate2,
                                     "3级分类": cate3
@@ -326,10 +327,23 @@ def run_scraping():
                             except: pass
                         time.sleep(1)
         
-        browser.close()
+    except Exception as e:
+        print(f"抓取流程发生异常: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        if browser:
+            try: browser.close()
+            except: pass
+        if p:
+            try: p.stop()
+            except: pass
 
     if not all_sku_rows:
-        print("没有抓取到任何SKU数据。")
+        if not FORCE_UPDATE and processed_ids:
+            print("没有抓取到任何SKU数据，可能是历史ID已全部处理。")
+        else:
+            print("没有抓取到任何SKU数据。")
         return
 
     print("开始整理数据并保存...")
@@ -337,7 +351,7 @@ def run_scraping():
     
     # 调整列顺序
     # 1. 基础列
-    base_cols = ["ID", "商品名称", "短标题", "1级分类", "2级分类", "3级分类", "SKU"]
+    base_cols = ["ID", "商品名称", "短标题", "是否同步支付宝", "1级分类", "2级分类", "3级分类", "SKU"]
     
     # 2. 动态列 (数据列)
     # 我们希望排除掉已经是 specs 的列，只保留数据列
@@ -419,6 +433,18 @@ def run_scraping():
             for c_idx, value in enumerate(row, 1):
                 cell = ws.cell(row=r_idx, column=c_idx, value=value)
                 cell.fill = fill
+                
+                # 特殊列格式化
+                col_name = final_cols[c_idx-1]
+                if col_name == "是否同步支付宝":
+                    if value == "已同步":
+                        # 绿色
+                        cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+                        cell.font = openpyxl.styles.Font(color="006100")
+                    else:
+                        # 灰色
+                        cell.fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+                        cell.font = openpyxl.styles.Font(color="000000")
 
         wb.save(OUTPUT_FILE)
         print(f"数据已保存到 {OUTPUT_FILE}")
@@ -429,9 +455,7 @@ def run_scraping():
         df.to_excel(OUTPUT_FILE, index=False)
         print("已使用普通模式保存。")
 
-    # 保存处理过的 ID
-    successful_ids = list(set([str(row["ID"]) for row in all_sku_rows]))
-    save_new_ids(successful_ids)
+    # 全量模式下无需保存 processed_ids
     print("完成。")
 
 def parse_sku_table(sku_table, master_headers):
@@ -594,4 +618,9 @@ def parse_sku_table(sku_table, master_headers):
     return rows
 
 if __name__ == "__main__":
-    run_scraping()
+    try:
+        run_scraping()
+    except Exception as e:
+        print(f"主流程异常退出: {e}")
+        import traceback
+        traceback.print_exc()

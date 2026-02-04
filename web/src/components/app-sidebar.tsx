@@ -46,6 +46,10 @@ const data = {
           url: "/",
         },
         {
+          title: "租金曲线配置",
+          url: "/curves",
+        },
+        {
           title: "任务日志",
           url: "/logs",
         },

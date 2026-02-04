@@ -1,0 +1,7 @@
+Starting command: C:\Users\tringame\AppData\Local\Programs\Python\Python311\python.exe -u D:\goods-manager\scrape_goods.py
+Working directory: D:\goods-manager
+--------------------------------------------------
+  File "D:\goods-manager\scrape_goods.py", line 98
+    ids_to_process = []
+    ^^^^^^^^^^^^^^
+SyntaxError: expected 'except' or 'finally' block
