@@ -128,7 +128,12 @@ export default function CurvesPage() {
                       {curve.id ? curve.id.substring(0, 8) + "..." : "-"}
                     </TableCell>
                     <TableCell className="font-medium">{curve.name}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{curve.source_sku || "-"}</TableCell>
+                    <TableCell className="text-xs">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-medium">{curve.source_name || "未知商品"}</span>
+                        <span className="text-[10px] text-muted-foreground font-mono">{curve.source_sku || "-"}</span>
+                      </div>
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground">{curve.created_at || "-"}</TableCell>
                     <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]">
                       {Object.entries(curve.multipliers || {})

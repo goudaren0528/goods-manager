@@ -604,6 +604,7 @@ function WorkbenchContent() {
                                             <TableHead className="w-[120px] border-r p-2 text-xs">SKU</TableHead>
                                         )}
                                         <TableHead className="w-[200px] border-r p-2 text-xs">商品名称</TableHead>
+                                        <TableHead className="w-[120px] border-r p-2 text-xs">支付宝编码</TableHead>
                                         {/* Removed explicit Logistics column as per request */}
                                         <TableHead className="w-[60px] border-r p-2 text-xs text-center">库存</TableHead>
                                         {rentCols.map(c => (
@@ -678,6 +679,14 @@ function WorkbenchContent() {
                                                         value={item.商品名称} 
                                                         onChange={(e) => handleFieldChange(globalIndex, "商品名称", e.target.value)}
                                                         title={item.商品名称}
+                                                    />
+                                                </TableCell>
+                                                <TableCell className="border-r p-1">
+                                                    <Input 
+                                                        className="h-7 text-xs px-2" 
+                                                        value={item.支付宝编码 || ""} 
+                                                        onChange={(e) => handleFieldChange(globalIndex, "支付宝编码", e.target.value)}
+                                                        title={item.支付宝编码}
                                                     />
                                                 </TableCell>
                                                 <TableCell className="border-r p-1">

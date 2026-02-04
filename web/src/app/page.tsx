@@ -1,19 +1,79 @@
 "use client";
 
 import { useCallback, useEffect, useState, Fragment } from "react";
-import { GoodsGroup, fetchGoods, runScrape, fetchTaskStatus, API_BASE, EXPORT_URL, updateMerchant, fetchConfig, updateConfig, saveRentCurve, RentCurve } from "@/lib/api";
+import { GoodsGroup, fetchGoods, runScrape, runPartialScrape, fetchTaskStatus, API_BASE, EXPORT_URL, updateMerchant, fetchConfig, updateConfig, saveRentCurve, RentCurve, deleteGoods, stopTask, updateAlipayCode } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { Loader2, ChevronRight, ChevronDown, ChevronLeft, Wand2 } from "lucide-react";
+import { Loader2, ChevronRight, ChevronDown, ChevronLeft, Wand2, Trash2, XCircle } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn, getRentInfo, RENT_DAYS } from "@/lib/utils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+
+function AlipayCodeInput({ id, initialValue }: { id: string; initialValue: string }) {
+  const [value, setValue] = useState(initialValue);
+  const [loading, setLoading] = useState(false);
+
+  // Sync with props if they change (e.g. after reload)
+  useEffect(() => {
+    setValue(initialValue);
+  }, [initialValue]);
+
+  const handleBlur = async () => {
+    if (value === initialValue) return;
+    setLoading(true);
+    try {
+      await updateAlipayCode(id, value);
+      toast.success("支付宝编码已更新");
+    } catch (e) {
+      toast.error("更新失败");
+      // Don't revert immediately, user might want to retry. 
+      // But for consistency we might want to revert or just show error.
+      // Reverting is safer for data consistency.
+      setValue(initialValue);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.currentTarget.blur();
+    }
+  };
+
+  return (
+    <div className="relative">
+      <Input 
+        value={value} 
+        onChange={(e) => setValue(e.target.value)} 
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        className="h-8 w-full text-xs pr-6"
+        disabled={loading}
+        placeholder="输入编码"
+      />
+      {loading && <Loader2 className="h-3 w-3 absolute right-2 top-2.5 animate-spin text-muted-foreground" />}
+    </div>
+  );
+}
 
 export default function Home() {
   const router = useRouter();
@@ -28,10 +88,21 @@ export default function Home() {
   const [extractSourceSku, setExtractSourceSku] = useState<any>(null);
   const [previewCurve, setPreviewCurve] = useState<Record<string, number>>({});
 
+  // 删除确认状态
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [goodsToDelete, setGoodsToDelete] = useState<string | null>(null);
+
+  // 抓取确认状态
+  const [scrapeConfirmOpen, setScrapeConfirmOpen] = useState(false);
+
   // 过滤功能状态
   const [filterKeywords, setFilterKeywords] = useState("已出租,下架,不可租");
   const [isFilterEnabled, setIsFilterEnabled] = useState(true);
   const [merchantFilter, setMerchantFilter] = useState("米奇");
+  const [syncStatusFilter, setSyncStatusFilter] = useState("all");
+
+  const [partialScrapeOpen, setPartialScrapeOpen] = useState(false);
+  const [partialScrapeIds, setPartialScrapeIds] = useState("");
 
   const [searchTerm, setSearchTerm] = useState("");
   const [taskStatus, setTaskStatus] = useState<{ running: boolean; task_name: string | null; message: string; progress: number }>({
@@ -57,7 +128,7 @@ export default function Home() {
     setLoading(true);
     try {
       const merchantParam = merchantFilter === "all" ? undefined : merchantFilter;
-      const res = await fetchGoods(page, pageSize, false, merchantParam);
+      const res = await fetchGoods(page, pageSize, false, merchantParam, syncStatusFilter);
       setGoods(Array.isArray(res.data) ? res.data : []);
       setTotal(typeof res.total === "number" ? res.total : 0);
     } catch (e) {
@@ -66,7 +137,7 @@ export default function Home() {
       setTotal(0);
     }
     setLoading(false);
-  }, [page, pageSize, merchantFilter]);
+  }, [page, pageSize, merchantFilter, syncStatusFilter]);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -115,11 +186,42 @@ export default function Home() {
 
   const handleSync = async () => {
     try {
+      setScrapeConfirmOpen(false);
       await runScrape();
       toast.success("抓取任务已启动，请在日志中查看进度");
       setTaskStatus({ running: true, task_name: "scrape", message: "Starting scrape task...", progress: 0 });
     } catch (e) {
       toast.error("启动失败: " + String(e));
+    }
+  };
+
+  const handleStopTask = async () => {
+    try {
+      await stopTask();
+      toast.success("已发送中止请求");
+    } catch (e) {
+      toast.error("中止失败: " + String(e));
+    }
+  };
+
+  const handlePartialScrape = async () => {
+    if (!partialScrapeIds.trim()) {
+        toast.error("请输入商品ID");
+        return;
+    }
+    const ids = partialScrapeIds.split(/[,，\n]/).map(s => s.trim()).filter(Boolean);
+    if (ids.length === 0) {
+        toast.error("无效的ID列表");
+        return;
+    }
+
+    try {
+        await runPartialScrape(ids);
+        toast.success(`已启动 ${ids.length} 个商品的抓取任务`);
+        setTaskStatus({ running: true, task_name: "scrape", message: `Starting partial scrape for ${ids.length} items...`, progress: 0 });
+        setPartialScrapeOpen(false);
+    } catch (e) {
+        toast.error("启动失败: " + String(e));
     }
   };
 
@@ -212,7 +314,8 @@ export default function Home() {
         await saveRentCurve({
             name: extractCurveName,
             multipliers: previewCurve,
-            source_sku: extractSourceSku?.SKU || extractSourceSku?.商品名称 || "未知商品"
+            source_sku: extractSourceSku?.SKU || extractSourceSku?.商品名称 || "未知商品",
+            source_name: extractSourceSku?.商品名称 || ""
         });
         toast.success("租金曲线已保存");
         setExtractDialogOpen(false);
@@ -221,8 +324,51 @@ export default function Home() {
     }
   };
 
+  const handleDeleteGoods = async () => {
+    if (!goodsToDelete) return;
+    try {
+        await deleteGoods(goodsToDelete);
+        toast.success(`商品 ${goodsToDelete} 已删除`);
+        setDeleteDialogOpen(false);
+        setGoodsToDelete(null);
+        loadData(true);
+    } catch (e) {
+        toast.error("删除失败: " + String(e));
+    }
+  };
+
   return (
     <div className="w-full max-w-[1800px] mx-auto p-4 space-y-4">
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除?</AlertDialogTitle>
+            <AlertDialogDescription>
+              此操作将永久删除商品 {goodsToDelete} 及其所有相关数据。此操作无法撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setGoodsToDelete(null)}>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteGoods} className="bg-red-600 hover:bg-red-700">确认删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={scrapeConfirmOpen} onOpenChange={setScrapeConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认更新所有商品?</AlertDialogTitle>
+            <AlertDialogDescription>
+              抓取所有商品需要10~30分钟，请确认是否继续。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setScrapeConfirmOpen(false)}>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={handleSync}>确认更新</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <Dialog open={extractDialogOpen} onOpenChange={setExtractDialogOpen}>
         <DialogContent>
             <DialogHeader>
@@ -255,6 +401,27 @@ export default function Home() {
         </DialogContent>
       </Dialog>
       
+      <Dialog open={partialScrapeOpen} onOpenChange={setPartialScrapeOpen}>
+        <DialogContent>
+            <DialogHeader>
+                <DialogTitle>抓取部分商品</DialogTitle>
+            </DialogHeader>
+            <div className="py-4 space-y-2">
+                <Label>输入商品ID (支持逗号、换行分隔)</Label>
+                <Textarea 
+                    value={partialScrapeIds}
+                    onChange={e => setPartialScrapeIds(e.target.value)}
+                    placeholder="12345, 67890&#10;11223"
+                    className="h-[150px]"
+                />
+                <p className="text-xs text-muted-foreground">注意：只会更新输入的商品，不会扫描列表页。</p>
+            </div>
+            <DialogFooter>
+                <Button onClick={handlePartialScrape}>开始抓取</Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
       <div className="flex flex-col gap-4 md:flex-row md:justify-between md:items-center">
         <h1 className="text-2xl font-bold">支付宝商品管理</h1>
         <div className="flex flex-col gap-2 sm:flex-row items-center flex-wrap">
@@ -274,6 +441,23 @@ export default function Home() {
                     <SelectItem value="星享">星享</SelectItem>
                     <SelectItem value="活力">活力</SelectItem>
                     <SelectItem value="all">全部</SelectItem>
+                </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-2">
+             <span className="text-sm font-medium whitespace-nowrap">同步:</span>
+             <Select value={syncStatusFilter} onValueChange={(v) => { 
+                 setSyncStatusFilter(v); 
+                 setPage(1); 
+             }}>
+                <SelectTrigger className="w-[80px] h-8">
+                    <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">全部</SelectItem>
+                    <SelectItem value="已同步">已同步</SelectItem>
+                    <SelectItem value="未同步">未同步</SelectItem>
                 </SelectContent>
             </Select>
           </div>
@@ -320,12 +504,19 @@ export default function Home() {
           </Button>
           <Button 
             variant="outline" 
-            onClick={handleSync} 
+            onClick={() => setPartialScrapeOpen(true)}
+            disabled={taskStatus.running}
+          >
+            更新部分商品
+          </Button>
+          <Button 
+            variant="outline" 
+            onClick={() => setScrapeConfirmOpen(true)} 
             disabled={taskStatus.running}
             className={taskStatus.running ? "opacity-50 cursor-not-allowed" : ""}
           >
             {taskStatus.running ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            {taskStatus.running ? "后台任务运行中..." : "更新商品数据 (抓取)"}
+            {taskStatus.running ? "后台任务运行中..." : "更新所有商品"}
           </Button>
           <Button onClick={startEdit} disabled={selectedIds.size === 0 || taskStatus.running}>
             进入修改工作台 ({selectedIds.size})
@@ -339,6 +530,15 @@ export default function Home() {
                 任务运行中 ({taskStatus.progress}%): {taskStatus.message}
             </span>
             <Progress value={taskStatus.progress} className="h-2 flex-1" />
+            <Button 
+                variant="destructive" 
+                size="sm" 
+                className="h-7 px-2 text-xs"
+                onClick={handleStopTask}
+            >
+                <XCircle className="h-3 w-3 mr-1" />
+                中止任务
+            </Button>
         </div>
       )}
       
@@ -355,8 +555,9 @@ export default function Home() {
               <TableHead className="w-[30px] px-1"></TableHead>
               <TableHead className="w-[60px] px-1">ID</TableHead>
               <TableHead className="w-[75px] px-1">商家</TableHead>
+              <TableHead className="w-[120px] px-1">支付宝编码</TableHead>
               <TableHead className="w-[70px] px-1">同步状态</TableHead>
-              <TableHead className="w-[300px] px-1">商品名称</TableHead>
+              <TableHead className="w-[150px] px-1">商品名称</TableHead>
               <TableHead className="w-[120px] px-1">分类</TableHead>
               <TableHead className="w-[60px] px-1 text-right">总库存</TableHead>
               <TableHead className="w-[50px] px-1 text-right">操作</TableHead>
@@ -406,6 +607,9 @@ export default function Home() {
                         </Select>
                       </TableCell>
                       <TableCell className="px-1 py-1">
+                          <AlipayCodeInput id={group.ID} initialValue={group.支付宝编码 || ""} />
+                      </TableCell>
+                      <TableCell className="px-1 py-1">
                         <span className={cn(
                             "px-1 py-0.5 rounded text-[10px] font-medium whitespace-nowrap",
                             group.是否同步支付宝 === "已同步" 
@@ -415,7 +619,7 @@ export default function Home() {
                             {group.是否同步支付宝 || "未知"}
                         </span>
                       </TableCell>
-                      <TableCell className="max-w-[300px] px-1 py-1">
+                      <TableCell className="max-w-[150px] px-1 py-1">
                         <div className="flex flex-col">
                             <span className="font-medium truncate text-xs" title={group.商品名称}>{group.商品名称}</span>
                             {group.短标题 && <span className="text-[10px] text-muted-foreground truncate" title={group.短标题}>{group.短标题}</span>}
@@ -426,7 +630,19 @@ export default function Home() {
                       </TableCell>
                       <TableCell className="text-right font-mono px-1 py-1 text-xs">{group.库存}</TableCell>
                       <TableCell className="text-right px-1 py-1">
-                         {/* Action Buttons if needed */}
+                         <Button 
+                             variant="ghost" 
+                             size="icon" 
+                             className="h-6 w-6 text-muted-foreground hover:text-red-600"
+                             onClick={(e) => {
+                                 e.stopPropagation();
+                                 setGoodsToDelete(group.ID);
+                                 setDeleteDialogOpen(true);
+                             }}
+                             title="删除商品"
+                         >
+                             <Trash2 className="h-3 w-3" />
+                         </Button>
                       </TableCell>
                     </TableRow>
                     

@@ -1,3 +1,5 @@
+import sys
+import argparse
 import time
 import os
 import re
@@ -14,7 +16,7 @@ PASSWORD = "Test0528."
 LOGIN_URL = "https://szguokuai.zlj.xyzulin.top/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods"
 MAX_PAGES = 0  # 最大抓取页数，设置 0 为不限制（抓取所有页）
 HEADLESS = True
-OUTPUT_FILE = f"scrape_goods_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+OUTPUT_FILE = f"scrape_goods_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 
 def update_master_headers(master_headers, current_headers):
     """
@@ -31,7 +33,16 @@ def update_master_headers(master_headers, current_headers):
             last_index = insert_pos
 
 def run_scraping():
-    print(f"启动抓取任务，HEADLESS={HEADLESS}，MAX_PAGES={MAX_PAGES}，全量同步模式")
+    parser = argparse.ArgumentParser(description='Scrape goods data')
+    parser.add_argument('--target-ids', type=str, help='Comma separated list of IDs to scrape', default='')
+    args = parser.parse_args()
+    
+    target_ids = []
+    if args.target_ids:
+        target_ids = [x.strip() for x in args.target_ids.split(',') if x.strip()]
+        print(f"启动抓取任务 (指定ID模式)，目标ID: {target_ids}，HEADLESS={HEADLESS}")
+    else:
+        print(f"启动抓取任务 (全量模式)，HEADLESS={HEADLESS}，MAX_PAGES={MAX_PAGES}")
     
     all_sku_rows = []
     master_sku_headers = [] # 用于记录所有SKU列的正确顺序
@@ -94,14 +105,19 @@ def run_scraping():
             print(f"登录检查异常: {e}")
 
         # --- 第一阶段：扫描列表页收集新ID ---
-        print("\n=== 第一阶段：扫描列表页收集新ID ===")
         ids_to_process = []
-        processed_ids = set()
-        FORCE_UPDATE = True
         scraped_sync_status = {}  # ID -> Sync Status
-        page_num = 1
         
-        while True:
+        if target_ids:
+            print("\n=== 指定ID模式：跳过列表扫描，直接处理指定ID ===")
+            ids_to_process = target_ids
+        else:
+            print("\n=== 第一阶段：扫描列表页收集新ID ===")
+            processed_ids = set()
+            FORCE_UPDATE = True
+            page_num = 1
+        
+        while not target_ids:
             if MAX_PAGES > 0 and page_num > MAX_PAGES:
                 print(f"已达到最大页数限制 ({MAX_PAGES})，停止扫描。")
                 break
@@ -162,44 +178,22 @@ def run_scraping():
                 # Playwright ElementHandle 没有 xpath 方法，使用 evaluate 获取父元素类名
                 try:
                     parent_class = next_btn.evaluate("el => el.parentElement.className")
-                    if parent_class and "disabled" in parent_class:
-                        print("下一页按钮已禁用 (li.disabled)，扫描结束。")
+                    if "disabled" in parent_class:
+                        print("下一页按钮被禁用，扫描结束。")
                         break
-                except:
-                    pass
-
-                try:
-                    # 获取当前URL以便对比
-                    current_url = page.url
-                    with page.expect_navigation(timeout=10000):
-                        next_btn.click()
                     
-                    # 再次确认是否真的跳转了
-                    if page.url == current_url:
-                        print("点击下一页后URL未变化，可能已到末尾。")
-                        break
-                        
+                    next_btn.click()
                     page_num += 1
+                    # 等待新页面加载
+                    page.wait_for_timeout(2000)
                 except Exception as e:
-                    print(f"翻页操作异常: {e}")
-                    # 尝试强制跳转到下一页URL (如果能推测出规律)
-                    # 通常 URL 里有 page=X 参数
-                    if "page=" in page.url:
-                        new_url = re.sub(r'page=\d+', f'page={page_num+1}', page.url)
-                        print(f"尝试强制跳转到: {new_url}")
-                        try:
-                            page.goto(new_url)
-                            page_num += 1
-                        except:
-                             print("强制跳转失败，停止扫描。")
-                             break
-                    else:
-                        break
+                    print(f"点击下一页失败: {e}")
+                    break
             else:
                 print("未找到下一页按钮，扫描结束。")
                 break
 
-        print(f"\n扫描结束，共发现 {len(ids_to_process)} 个新商品需要抓取。")
+            print(f"\n扫描结束，共发现 {len(ids_to_process)} 个新商品需要抓取。")
         
         # --- 第二阶段：批量抓取详情 ---
         if ids_to_process:
@@ -400,60 +394,13 @@ def run_scraping():
             
     df = df.reindex(columns=final_cols)
 
-    # 保存并设置样式
+    # 保存数据
     try:
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        
-        # 写入表头
-        for c_idx, col_name in enumerate(final_cols, 1):
-            ws.cell(row=1, column=c_idx, value=col_name)
-            
-        # 写入数据并设置背景色
-        # 使用 PatternFill
-        fill_colors = ["E0F7FA", "F3E5F5"] # 浅蓝, 浅紫
-        current_fill_idx = 0
-        last_goods_id = None
-        
-        # openpyxl 的 row 从 1 开始，header 是 row 1
-        # dataframe rows
-        rows = dataframe_to_rows(df, index=False, header=False)
-        
-        for r_idx, row in enumerate(rows, 2):
-            # 获取当前行的 ID (假设 ID 在第一列)
-            # row 是一个 list
-            current_id = row[0] # ID 列
-            
-            if current_id != last_goods_id:
-                current_fill_idx = (current_fill_idx + 1) % len(fill_colors)
-                last_goods_id = current_id
-                
-            fill = PatternFill(start_color=fill_colors[current_fill_idx], end_color=fill_colors[current_fill_idx], fill_type="solid")
-            
-            for c_idx, value in enumerate(row, 1):
-                cell = ws.cell(row=r_idx, column=c_idx, value=value)
-                cell.fill = fill
-                
-                # 特殊列格式化
-                col_name = final_cols[c_idx-1]
-                if col_name == "是否同步支付宝":
-                    if value == "已同步":
-                        # 绿色
-                        cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-                        cell.font = openpyxl.styles.Font(color="006100")
-                    else:
-                        # 灰色
-                        cell.fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
-                        cell.font = openpyxl.styles.Font(color="000000")
-
-        wb.save(OUTPUT_FILE)
+        # Save as JSON
+        df.to_json(OUTPUT_FILE, orient="records", force_ascii=False, indent=2)
         print(f"数据已保存到 {OUTPUT_FILE}")
-        
     except Exception as e:
-        print(f"保存 Excel 失败: {e}")
-        # 降级保存
-        df.to_excel(OUTPUT_FILE, index=False)
-        print("已使用普通模式保存。")
+        print(f"保存 JSON 失败: {e}")
 
     # 全量模式下无需保存 processed_ids
     print("完成。")

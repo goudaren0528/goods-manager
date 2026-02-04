@@ -11,7 +11,7 @@ USERNAME = "伟填"
 PASSWORD = "Test0528."
 LOGIN_URL = "https://szguokuai.zlj.xyzulin.top/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods"
 # 默认数据文件，可以通过命令行参数覆盖
-DATA_FILE = sys.argv[1] if len(sys.argv) > 1 else "update_goods_data.xlsx"
+DATA_FILE = sys.argv[1] if len(sys.argv) > 1 else "update_goods_data.json"
 HEADLESS = True
 
 def log_update(message):
@@ -43,9 +43,9 @@ def normalize_sku_key(sku_str):
     sorted_parts = sorted(cleaned_parts)
     return "|".join(sorted_parts)
 
-def parse_excel_specs(group_df):
+def parse_specs(group_df):
     """
-    从 Excel 数据中解析出该商品需要的所有规格和值
+    从数据中解析出该商品需要的所有规格和值
     返回: { "规格名": ["值1", "值2"], ... } (有序字典)
     """
     from collections import OrderedDict
@@ -594,7 +594,7 @@ def get_page_sku_map(page):
         
     return sku_map
 
-def sync_goods_data(update_df, output_file="goods_data.xlsx"):
+def sync_goods_data(update_df, output_file="goods_data.json"):
     if update_df is None or update_df.empty:
         return
     if "ID" not in update_df.columns:
@@ -607,14 +607,17 @@ def sync_goods_data(update_df, output_file="goods_data.xlsx"):
     
     if not os.path.exists(output_file):
         try:
-            update_df.to_excel(output_file, index=False)
+            update_df.to_json(output_file, orient="records", force_ascii=False, indent=2)
             log_update(f"  - 已生成 {output_file}")
         except Exception as e:
             log_update(f"  - 写入 {output_file} 失败: {e}")
         return
         
     try:
-        goods_df = pd.read_excel(output_file, dtype=str)
+        # 使用 read_json 读取
+        goods_df = pd.read_json(output_file, dtype=False)
+        if "ID" in goods_df.columns:
+            goods_df["ID"] = goods_df["ID"].astype(str)
         goods_df.fillna("", inplace=True)
     except Exception as e:
         log_update(f"  - 读取 {output_file} 失败: {e}")
@@ -643,17 +646,17 @@ def sync_goods_data(update_df, output_file="goods_data.xlsx"):
     
     merged_df = pd.concat([goods_df_filtered, update_df], ignore_index=True)
     try:
-        merged_df.to_excel(output_file, index=False)
+        merged_df.to_json(output_file, orient="records", force_ascii=False, indent=2)
         log_update(f"  - 已同步更新到 {output_file} (覆盖 {len(target_ids)} 个ID)")
     except Exception as e:
         log_update(f"  - 写入 {output_file} 失败: {e}")
         if "Permission denied" in str(e):
             try:
                 timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-                backup_file = f"goods_data_backup_{timestamp}.xlsx"
-                merged_df.to_excel(backup_file, index=False)
+                backup_file = f"goods_data_backup_{timestamp}.json"
+                merged_df.to_json(backup_file, orient="records", force_ascii=False, indent=2)
                 log_update(f"  - 严重警告: 原文件被占用，数据已紧急保存到: {backup_file}")
-                log_update(f"  - 请关闭 Excel 后手动将备份文件重命名为 {output_file}")
+                log_update(f"  - 请关闭文件后手动将备份文件重命名为 {output_file}")
             except Exception as e2:
                 log_update(f"  - 备份写入也失败: {e2}")
 
@@ -664,15 +667,19 @@ def run_update():
 
     print(f"正在读取数据文件 {DATA_FILE} ...")
     try:
-        df = pd.read_excel(DATA_FILE, dtype=str)
+        # 使用 read_json 读取
+        df = pd.read_json(DATA_FILE, dtype=False) # dtype=False 让 pandas 自动推断，或者 True 保持原始
+        # JSON通常保留了类型，但为了保险，ID 转字符串
+        if "ID" in df.columns:
+            df["ID"] = df["ID"].astype(str)
         df.fillna("", inplace=True)
     except Exception as e:
-        print(f"读取 Excel 失败: {e}")
+        print(f"读取数据文件失败: {e}")
         return
 
     # 按 ID 分组
     if "ID" not in df.columns:
-        print("错误：Excel 中缺少 'ID' 列")
+        print("错误：数据中缺少 'ID' 列")
         return
 
     grouped = df.groupby("ID")
@@ -770,8 +777,8 @@ def run_update():
                                 log_update(f"  - 警告: 更新 {col_name} 失败: {e} (可能选项不存在)")
 
                 # 2. 检查并同步规格 (新增逻辑)
-                # 解析 Excel 中该商品的目标规格结构
-                target_specs = parse_excel_specs(group_df)
+                # 解析数据中该商品的目标规格结构
+                target_specs = parse_specs(group_df)
                 log_update(f"  - 解析到的目标规格: {target_specs}")
                 
                 # 提取租期信息
@@ -781,7 +788,7 @@ def run_update():
                 elif "天数" in target_specs:
                     target_tenancies = target_specs["天数"]
                 else:
-                    # 尝试从 Excel 列名中解析租期 (例如 "3天租金", "30天租金")
+                    # 尝试从列名中解析租期 (例如 "3天租金", "30天租金")
                     # group_df 的列名中如果包含 "天租金" 或 "天价格"
                     for col in group_df.columns:
                         if "天租金" in col:
@@ -821,7 +828,7 @@ def run_update():
                         page_sku_data = page_sku_map[target_sku_key]
                         data_inputs = page_sku_data["data_inputs"]
                         
-                        # 遍历 Excel 中的列，查找是否有对应的数据列需要更新
+                        # 遍历数据中的列，查找是否有对应的数据列需要更新
                         for col_name in row.index:
                             # 跳过基础列和 SKU 列
                             if col_name in ["ID", "商品名称", "短标题", "1级分类", "2级分类", "3级分类", "SKU"]:
@@ -894,8 +901,6 @@ def run_update():
         if p:
             try: p.stop()
             except: pass
-        
-    sync_goods_data(df)
 
 if __name__ == "__main__":
     run_update()

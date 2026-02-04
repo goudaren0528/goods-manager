@@ -12,6 +12,7 @@ export interface RentCurve {
   id?: string;
   name: string;
   source_sku?: string;
+  source_name?: string;
   created_at?: string;
   multipliers: Record<string, number>;
 }
@@ -51,6 +52,7 @@ export interface GoodsGroup {
   skus: GoodsItem[];
   merchant?: string;
   是否同步支付宝?: string;
+  支付宝编码?: string;
 }
 
 export const API_BASE = "http://127.0.0.1:8000";
@@ -64,17 +66,16 @@ export interface FetchGoodsResponse {
   total_pages: number;
 }
 
-export async function fetchGoods(page = 1, limit = 50, all_data = false, merchant?: string): Promise<FetchGoodsResponse> {
-  const params: Record<string, string> = {
-    page: String(page),
-    limit: String(limit),
-    all_data: String(all_data),
-  };
-  if (merchant) {
-    params.merchant = merchant;
-  }
-  const query = new URLSearchParams(params);
-  const res = await fetch(`${API_BASE}/goods?${query.toString()}`, { cache: 'no-store' });
+export async function fetchGoods(page: number, limit: number, allData = false, merchant?: string, syncStatus?: string): Promise<FetchGoodsResponse> {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    limit: limit.toString(),
+    all_data: allData.toString(),
+  });
+  if (merchant) params.append("merchant", merchant);
+  if (syncStatus) params.append("sync_status", syncStatus);
+
+  const res = await fetch(`${API_BASE}/goods?${params.toString()}`, { cache: 'no-store' });
   if (!res.ok) throw new Error("Failed to fetch goods");
   return res.json();
 }
@@ -89,12 +90,27 @@ export const runScrape = async (): Promise<Record<string, unknown>> => {
   return res.json();
 };
 
+export const runPartialScrape = async (ids: string[]): Promise<Record<string, unknown>> => {
+  const res = await fetch(`${API_BASE}/run-scrape-partial`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) {
+    throw new Error("Failed to run partial scrape");
+  }
+  return res.json();
+};
+
 export const prepareUpdate = async (items: Partial<GoodsItem>[]): Promise<Record<string, unknown>> => {
   const res = await fetch(`${API_BASE}/prepare-update`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items }),
+    body: JSON.stringify(items),
   });
+  if (!res.ok) {
+    throw new Error("Failed to prepare update data");
+  }
   return res.json();
 }
 
@@ -121,6 +137,14 @@ export const fetchTaskStatus = async (): Promise<{ running: boolean; task_name: 
   return res.json();
 };
 
+export async function stopTask() {
+  const res = await fetch(`${API_BASE}/stop-task`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to stop task");
+  return res.json();
+}
+
 export async function updateMerchant(id: string, merchant: string) {
   const res = await fetch(`${API_BASE}/goods/${id}/merchant`, {
     method: "POST",
@@ -128,6 +152,24 @@ export async function updateMerchant(id: string, merchant: string) {
     body: JSON.stringify({ merchant }),
   });
   if (!res.ok) throw new Error("Failed to update merchant");
+  return res.json();
+}
+
+export async function updateAlipayCode(id: string, code: string) {
+  const res = await fetch(`${API_BASE}/goods/${id}/field`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ field: "支付宝编码", value: code }),
+  });
+  if (!res.ok) throw new Error("Failed to update alipay code");
+  return res.json();
+}
+
+export async function deleteGoods(id: string) {
+  const res = await fetch(`${API_BASE}/goods/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete goods");
   return res.json();
 }
 
