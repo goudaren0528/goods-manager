@@ -16,7 +16,7 @@ PASSWORD = "Test0528."
 LOGIN_URL = "https://szguokuai.zlj.xyzulin.top/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods"
 MAX_PAGES = 0  # 最大抓取页数，设置 0 为不限制（抓取所有页）
 HEADLESS = True
-OUTPUT_FILE = f"scrape_goods_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+OUTPUT_FILE = "scrape_goods_data.json"
 
 def update_master_headers(master_headers, current_headers):
     """

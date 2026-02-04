@@ -530,20 +530,11 @@ def run_scrape_task(target_ids: List[str] = None):
             with open(log_path, "a", encoding="utf-8") as f:
                 f.write(f"[System] {msg}\n")
 
-        # Look for JSON files now
-        files = glob.glob(os.path.join(work_dir, "scrape_goods_data_*.json"))
-        if not files:
-            msg = "No output file found in " + work_dir
-            log_to_file(msg)
-            update_task_status(False, None, msg, 0)
-            return
-            
-        latest_file = max(files, key=os.path.getctime)
+        # Use fixed filename now
+        latest_file = os.path.join(work_dir, "scrape_goods_data.json")
         
-        # Check if file is recent (within 10 minutes)
-        import time
-        if time.time() - os.path.getctime(latest_file) > 600:
-             msg = f"Latest file {latest_file} is too old (>10 mins). Scrape likely produced no data."
+        if not os.path.exists(latest_file):
+             msg = f"No output file found: {latest_file}. Scrape likely failed or produced no data."
              log_to_file(msg)
              update_task_status(False, None, msg, 0)
              return
