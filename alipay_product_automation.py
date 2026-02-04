@@ -3,274 +3,328 @@ import random
 import datetime
 import os
 import re
+import json
+import argparse
+import sys
 from playwright.sync_api import sync_playwright
 
 # --- 配置区域 ---
-PENDING_FILE = "pending.txt"
-ALIPAY_HOME_URL = "https://b.alipay.com/"
+STATUS_FILE = "automation_status.json"
+CAPTCHA_INPUT_FILE = "captcha_input.txt"
+DATA_FILE = "automation_data.json" # Input data file
+
+ALIPAY_HOME_URL = "https://b.alipay.com/page/portal/home"
 GOODS_LIST_URL = "https://b.alipay.com/page/commerce/goods/list?appId=2021005181665859&itemSubType=RENT&itemType=NORMAL_ITEM"
-USER_DATA_DIR = os.path.join(os.getcwd(), "alipay_user_data") # 用户数据目录，用于保持登录状态
+USER_DATA_DIR = os.path.join(os.getcwd(), "alipay_user_data")
 
-# 待填写的文本内容
-SERVICE_INTRO = ""          # value_added_services_0_service_introduction
-PROTECTION_SCOPE = ""       # value_added_services_0_protection_scope
-DISCLAIMER = ""             # value_added_services_0_disclaimer
-CLAIM_PROCESS = ""          # value_added_services_0_claim_process
+# 待填写的文本内容 (保持原有逻辑)
+SERVICE_INTRO = ""
+PROTECTION_SCOPE = ""
+DISCLAIMER = ""
+CLAIM_PROCESS = ""
 
-def load_pending_ids():
-    if not os.path.exists(PENDING_FILE):
-        print(f"错误: {PENDING_FILE} 不存在")
-        return []
-    with open(PENDING_FILE, "r", encoding="utf-8") as f:
-        # 过滤空行和空白字符
-        return [line.strip() for line in f if line.strip()]
+def log_status(status, message, needed_data=None):
+    """Write status to file for frontend to poll"""
+    data = {
+        "status": status,
+        "message": message,
+        "timestamp": time.time()
+    }
+    if needed_data:
+        data.update(needed_data)
+    
+    with open(STATUS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    print(f"[{status}] {message}")
 
 def get_timestamp_str():
     return datetime.datetime.now().strftime("%Y%m%d%H%M%S")
 
+def wait_for_captcha():
+    """Wait for captcha code from file"""
+    log_status("waiting_for_captcha", "请输入短信验证码")
+    
+    # Remove old input file if exists
+    if os.path.exists(CAPTCHA_INPUT_FILE):
+        try:
+            os.remove(CAPTCHA_INPUT_FILE)
+        except:
+            pass
+            
+    print("等待验证码输入...")
+    while True:
+        if os.path.exists(CAPTCHA_INPUT_FILE):
+            try:
+                with open(CAPTCHA_INPUT_FILE, "r", encoding="utf-8") as f:
+                    code = f.read().strip()
+                if code:
+                    print(f"获取到验证码: {code}")
+                    return code
+            except:
+                pass
+        time.sleep(1)
+
+def perform_login(page, phone_number):
+    print(f"访问首页: {ALIPAY_HOME_URL}")
+    page.goto(ALIPAY_HOME_URL)
+    
+    # Check if already logged in (look for some element that indicates login)
+    # But user requested specific flow, so we try to follow it if not logged in.
+    
+    try:
+        # Click Login Button
+        # Selector provided: #bportal > div > div.header___nV0_x.bportalcomponents-header.undefined > div.portalTechWarp___Zh8Rp.hasEnoughWidth___SHnHo > div.headerRight___qCNXo.portalTech___IpIba > a
+        # Simplified selector for robustness if possible, but using user's specific one first
+        print("尝试点击登录按钮...")
+        login_btn = page.locator("#bportal > div > div.header___nV0_x.bportalcomponents-header.undefined > div.portalTechWarp___Zh8Rp.hasEnoughWidth___SHnHo > div.headerRight___qCNXo.portalTech___IpIba > a")
+        if login_btn.is_visible(timeout=5000):
+            login_btn.click()
+        else:
+            print("未找到首页登录按钮，可能已跳转或布局变更，尝试直接检测登录状态...")
+    except Exception as e:
+        print(f"点击登录按钮异常: {e}")
+
+    # Wait for login page elements
+    # Click Captcha Login Tab: #J-loginMethod-tabs > li:nth-child(2)
+    try:
+        print("等待登录方式选项卡...")
+        # Check if we are on a login page
+        # Sometimes it opens a popup or redirects.
+        # Wait for the tab to appear.
+        tab = page.locator("#J-loginMethod-tabs > li:nth-child(2)")
+        if tab.is_visible(timeout=10000):
+            print("点击短信登录选项卡...")
+            tab.click()
+            
+            # Input Phone: #J-input-user
+            print(f"输入手机号: {phone_number}")
+            page.fill("#J-input-user", phone_number)
+            
+            # Click SMS Input: #J-input-sms (Requested by user)
+            print("点击验证码输入框...")
+            page.click("#J-input-sms")
+            
+            # Click Get Code: #J-verifyCode
+            print("点击获取验证码...")
+            page.click("#J-verifyCode")
+            
+            # Wait for Captcha from user
+            code = wait_for_captcha()
+            
+            # Input Captcha: #J-input-sms
+            print("输入验证码...")
+            page.fill("#J-input-sms", code)
+            
+            # Click Login/Submit
+            # User didn't provide submit button selector. Usually it's a button nearby.
+            # Try to find a button with "登录" text in the form
+            print("尝试提交登录...")
+            submit_btn = page.locator("button:has-text('登录')").first
+            if submit_btn.is_visible():
+                submit_btn.click()
+            else:
+                # Fallback: press Enter in the input
+                page.press("#J-input-sms", "Enter")
+                
+            # Wait for navigation
+            page.wait_for_load_state("networkidle")
+            
+        else:
+            print("未检测到登录选项卡，可能已登录或页面不同。")
+            
+    except Exception as e:
+        print(f"登录流程异常: {e}")
+        print("请手动完成登录...")
+
+def ensure_goods_list_page(page):
+    """Ensure we are on the goods list page"""
+    if GOODS_LIST_URL not in page.url:
+        print("跳转到商品列表页...")
+        page.goto(GOODS_LIST_URL)
+        try:
+            page.wait_for_selector(".merchant-ui-table", timeout=10000)
+        except:
+            print("等待商品列表表格超时，可能需要手动介入...")
+
 def main():
-    pending_ids = load_pending_ids()
-    if not pending_ids:
-        print("没有待处理的商品ID。")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data", help="Path to JSON data file", default=DATA_FILE)
+    parser.add_argument("--phone", help="Phone number for login", default="")
+    args = parser.parse_args()
+    
+    # Load data
+    target_items = []
+    if os.path.exists(args.data):
+        with open(args.data, "r", encoding="utf-8") as f:
+            target_items = json.load(f)
+    else:
+        print(f"数据文件 {args.data} 不存在")
         return
 
-    print(f"待处理ID列表: {pending_ids}")
+    print(f"待处理条目数: {len(target_items)}")
+    log_status("running", "启动浏览器...")
 
     with sync_playwright() as p:
-        # 启动持久化上下文，保持登录状态
-        # 注意：如果浏览器正在运行且使用了相同的 user_data_dir，这里可能会报错
+        # Launch browser (Headful as requested)
         if not os.path.exists(USER_DATA_DIR):
             os.makedirs(USER_DATA_DIR)
             
-        print(f"启动浏览器 (UserData: {USER_DATA_DIR})...")
         context = p.chromium.launch_persistent_context(
             user_data_dir=USER_DATA_DIR,
-            headless=True,
+            headless=False, # User requested headed mode
             args=["--start-maximized"],
             no_viewport=True
         )
         
-        # 获取第一个页面或新建
         page = context.pages[0] if context.pages else context.new_page()
-
-        # 1. 访问首页并等待登录
-        print(f"正在访问 {ALIPAY_HOME_URL}，如未登录请手动登录...")
-        try:
+        
+        # Login Flow
+        if args.phone:
+            log_status("running", "执行登录流程...")
+            perform_login(page, args.phone)
+        else:
+            log_status("running", "跳过自动登录(未提供手机号)，请手动登录...")
             page.goto(ALIPAY_HOME_URL)
-        except Exception as e:
-            print(f"打开首页异常 (可忽略): {e}")
 
-        print(">>> 请在浏览器中完成登录，并选择账号进入商家后台 <<<")
-        print(">>> 脚本将持续检测商品列表页，直到成功进入 <<<")
+        # Wait for Goods List
+        log_status("running", "进入商品列表...")
+        ensure_goods_list_page(page)
         
-        # 循环检测直到成功进入商品列表页
-        # 逻辑：
-        # 1. 每隔几秒尝试判断当前是否已在列表页
-        # 2. 如果不在，且 URL 看起来已登录，尝试跳转到列表页
-        # 3. 如果跳转后找不到表格，说明可能还在选账号或登录未完成，继续等待
-        
-        while True:
-            try:
-                # A. 尝试跳转到商品列表页 (如果当前不在)
-                if GOODS_LIST_URL not in page.url:
-                    print(f"尝试跳转到商品列表页...")
-                    try:
-                        page.goto(GOODS_LIST_URL)
-                        page.wait_for_load_state("networkidle", timeout=5000)
-                    except:
-                        pass # 忽略跳转超时
-
-                # B. 检测是否成功显示了商品表格
-                try:
-                    # 短暂等待表格出现
-                    page.wait_for_selector(".merchant-ui-table", timeout=5000)
-                    print("SUCCESS: 成功检测到商品表格！开始执行任务...")
-                    break # 成功！跳出循环
-                except:
-                    # 未找到表格
-                    print("等待中... 请确保已登录并进入商家后台 (脚本正在重试进入列表页)")
-                    # 如果用户正在操作（比如选账号），不要频繁刷新打断，多等一会儿
-                    time.sleep(5)
+        # Process Items
+        processed_count = 0
+        for item in target_items:
+            target_id = str(item.get("id"))
+            alipay_code = str(item.get("alipay_code", "")).strip()
             
-            except Exception as e:
-                print(f"检测循环异常: {e}，重试中...")
-                time.sleep(3)
-
-
-        # 2. 遍历处理 ID
-        processed_ids = []
-        
-        for target_id in pending_ids:
-            print(f"\n正在查找商品 ID: {target_id}")
-            
-            # 每次查找新 ID 时，建议刷新回第一页，防止漏找
-            print("正在重置到列表首页...")
-            page.goto(GOODS_LIST_URL)
-            try:
-                page.wait_for_selector(".merchant-ui-table", timeout=10000)
-            except:
-                print("等待表格超时，重试...")
-                page.reload()
-                page.wait_for_selector(".merchant-ui-table")
-
-            # 查找匹配的行 (支持翻页)
-            found = False
-            target_row = None
-            
-            while True:
-                # 等待表格加载
-                page.wait_for_timeout(2000)
-                
-                # 获取所有行
-                rows = page.locator(".merchant-ui-table table tbody tr").all()
-                print(f"当前页共有 {len(rows)} 行数据")
-                
-                for row in rows:
-                    try:
-                        # 获取商家侧编码
-                        # 用户选择器: td.ant-table-cell.ant-table-cell-fix-left.ant-table-cell-fix-left-last > div > div.goodsPart___GoH9Y > span:nth-child(3)
-                        # 尝试定位到 goodsPart___GoH9Y 下的第三个 span
-                        code_el = row.locator(".goodsPart___GoH9Y span").nth(2)
-                        
-                        # 如果找不到，尝试更通用的定位
-                        if not code_el.count():
-                             code_el = row.locator("td:nth-child(2)").first
-                        
-                        code_text = code_el.inner_text().strip()
-                        
-                        # 匹配逻辑：必须包含类似 -ID- 的结构，即 ID 被横杠分隔或位于边界
-                        # 使用正则匹配：(行首或-) + ID + (行尾或-)
-                        # 避免部分匹配错误（如搜 253 匹配到 1253）
-                        pattern = r'(?:^|-){}(?:-|$)'.format(re.escape(str(target_id)))
-                        
-                        if re.search(pattern, code_text):
-                            print(f"找到匹配行！商家侧编码内容: {code_text}")
-                            target_row = row
-                            found = True
-                            break
-                    except Exception as e:
-                        continue
-                
-                if found:
-                    break
-                
-                # 未找到，尝试翻页
-                # 用户选择器: li.ant-pagination-next > button
-                next_li = page.locator("li.ant-pagination-next").first
-                
-                if next_li.count() > 0:
-                    # 检查是否禁用 (class 包含 ant-pagination-disabled 或 aria-disabled=true)
-                    class_attr = next_li.get_attribute("class") or ""
-                    aria_disabled = next_li.get_attribute("aria-disabled")
-                    
-                    if "ant-pagination-disabled" not in class_attr and aria_disabled != "true":
-                        next_btn = next_li.locator("button")
-                        if next_btn.is_visible():
-                            print("当前页未找到，点击下一页...")
-                            next_btn.click()
-                            continue
-                
-                print(f"已遍历所有页，未找到 ID {target_id}")
-                break
-
-            if not found:
-                print(f"未找到 ID {target_id}，跳过")
+            if not alipay_code:
+                print(f"跳过 ID {target_id}: 无支付宝编码")
                 continue
                 
-            # 3. 点击更多 -> 复制
-            try:
-                # 更多按钮: td:nth-child(8) > div > a
-                more_btn = target_row.locator("td:nth-child(8) a").first
-                more_btn.click()
-                
-                # 等待下拉菜单出现并点击“复制”
-                print("点击更多按钮，等待菜单...")
-                # 等待下拉菜单出现，通常在 body 下
-                page.wait_for_selector(".ant-dropdown:not(.ant-dropdown-hidden)", timeout=5000)
-                
-                with context.expect_page() as new_page_info:
-                    # 点击“复制”文本
-                    page.locator(".ant-dropdown-menu-item:has-text('复制')").click()
+            log_status("running", f"正在处理 ID {target_id} (支付宝编码: {alipay_code})")
+            print(f"\n--- 处理 ID {target_id} ---")
+            
+            # Reset to list page for each item to be safe
+            ensure_goods_list_page(page)
+            
+            # Search logic (Reuse existing but adapted)
+            found_row = find_row_by_merchant_code(page, alipay_code)
+            
+            if found_row:
+                print("找到匹配行，准备编辑...")
+                try:
+                    # Click Edit
+                    # Assuming "Edit" is in the "More" dropdown or visible
+                    # User request: "点击编辑"
+                    # Try to find "编辑" button directly or in dropdown
                     
-                new_page = new_page_info.value
-                print("新窗口已打开，等待加载...")
-                new_page.wait_for_load_state("domcontentloaded")
-                
-                # 4. 在新窗口操作
-                handle_copy_page(new_page, target_id)
-                
-                print(f"ID {target_id} 处理完成，保留新窗口...")
-                # new_page.close() # 用户要求不关闭
-                processed_ids.append(target_id)
-                
-            except Exception as e:
-                print(f"处理 ID {target_id} 时发生错误: {e}")
-                import traceback
-                traceback.print_exc()
+                    # Strategy: Check for "编辑" link/button in the row
+                    edit_btn = found_row.locator("a:has-text('编辑')").first
+                    if edit_btn.is_visible():
+                        edit_btn.click()
+                    else:
+                        # Try "More" -> "Edit"
+                        more_btn = found_row.locator("td:nth-child(8) a").first # reuse existing column index assumption
+                        if more_btn.is_visible():
+                            more_btn.click()
+                            page.wait_for_selector(".ant-dropdown:not(.ant-dropdown-hidden)", timeout=5000)
+                            page.locator(".ant-dropdown-menu-item:has-text('编辑')").click()
+                    
+                    # Handle Edit Page
+                    # Wait for page navigation
+                    page.wait_for_load_state("domcontentloaded")
+                    handle_update_page(page, item)
+                    processed_count += 1
+                    
+                except Exception as e:
+                    print(f"编辑操作失败: {e}")
+            else:
+                print(f"未找到商家侧编码为 {alipay_code} 的商品")
 
-        print("\n所有任务处理完毕。")
-        input("按回车键退出程序 (将关闭浏览器)...")
+        log_status("finished", f"任务完成，已处理 {processed_count} 个商品")
+        # Keep open for a bit or close? User said "development... convenient to observe"
+        # We'll wait a few seconds then close, or better, wait for user to stop it via API if we were loop.
+        # But this is a script run. Let's just finish.
+        time.sleep(5)
         context.close()
 
-def handle_copy_page(page, original_id):
-    """在新窗口中填写表单"""
-    # 等待表单加载
-    page.wait_for_selector("#formContainerWrap", timeout=20000)
-    time.sleep(3) # 额外等待渲染
-    
-    timestamp = get_timestamp_str()
-    
-    # 1. 修改商家侧编码
-    print("正在修改商家侧编码...")
-    # 用户路径: #formContainerWrap > div.goodsContainer___wtXQp > div > form > div:nth-child(2) > div.ant-card-body > div > div:nth-child(5) ... input
-    # 尝试使用相对稳定的部分
-    try:
-        # 定位到包含“商家侧编码”的 label 所在的 form-item，然后找 input
-        code_input = page.locator("label:has-text('商家侧编码')").locator("xpath=../..").locator("input").first
-        if not code_input.is_visible():
-             # Fallback: 使用第5个 form item 的 input (基于用户描述)
-             code_input = page.locator("div.goodsContainer___wtXQp form > div:nth-child(2) .ant-form-item").nth(4).locator("input")
+def find_row_by_merchant_code(page, target_code):
+    """Find row where merchant code matches target_code"""
+    # Reuse pagination logic from original script
+    while True:
+        page.wait_for_timeout(2000)
+        rows = page.locator(".merchant-ui-table table tbody tr").all()
         
-        current_val = code_input.input_value()
-        new_val = f"{current_val}_{timestamp}"
-        print(f"编码更新: {current_val} -> {new_val}")
-        code_input.fill(new_val)
+        for row in rows:
+            try:
+                # Get merchant code text
+                # Reuse selector from original script
+                code_el = row.locator(".goodsPart___GoH9Y span").nth(2)
+                if not code_el.count():
+                     code_el = row.locator("td:nth-child(2)").first
+                
+                code_text = code_el.inner_text().strip()
+                
+                # Check for exact match (ignoring whitespace)
+                # User requested: "check merchant side code = alipay code"
+                if target_code == code_text:
+                    print(f"Found match: {code_text}")
+                    return row
+                else:
+                    # Debug log (optional, but helpful)
+                    # print(f"Checking: {code_text} != {target_code}")
+                    pass
+            except:
+                continue
         
-        # 保存新的编码用于 SKU 前缀
-        sku_prefix = new_val
-    except Exception as e:
-        print(f"修改商家侧编码失败: {e}")
-        sku_prefix = f"SKU_{original_id}_{timestamp}"
+        # Next page
+        next_li = page.locator("li.ant-pagination-next").first
+        if next_li.count() > 0:
+            class_attr = next_li.get_attribute("class") or ""
+            aria_disabled = next_li.get_attribute("aria-disabled")
+            if "ant-pagination-disabled" not in class_attr and aria_disabled != "true":
+                next_btn = next_li.locator("button")
+                if next_btn.is_visible():
+                    next_btn.click()
+                    continue
+        break
+    return None
 
-    # 2. 租期计算规则 & 免押金
+def handle_update_page(page, item):
+    """Update info on the edit page"""
+    print("进入编辑页面，开始更新信息...")
+    # Wait for form
     try:
-        print("设置租期规则和免押金...")
-        page.locator("#rent_duration_cal_rule label").nth(1).click() # nth-child(2) is index 1
-        page.locator("#whether_support_free_deposit label").nth(0).click() # nth-child(1) is index 0
+        page.wait_for_selector("#formContainerWrap", timeout=15000)
+    except:
+        # Maybe it's not #formContainerWrap in edit mode?
+        pass
+        
+    time.sleep(2)
+    
+    # 1. Update Rent Rules & Deposit (Same as copy logic)
+    try:
+        print("更新租期规则和免押金...")
+        # Check if elements exist before clicking (Edit mode might have values pre-filled)
+        # Just re-click to ensure
+        page.locator("#rent_duration_cal_rule label").nth(1).click() 
+        page.locator("#whether_support_free_deposit label").nth(0).click()
     except Exception as e:
         print(f"设置租期/免押金失败: {e}")
 
-    # 3. 修改增值服务内容
-    print("修改增值服务内容...")
+    # 2. Update Value Added Services (Same as copy logic)
+    print("更新增值服务内容...")
     fill_textarea(page, "#value_added_services_0_service_introduction", SERVICE_INTRO)
     fill_textarea(page, "#value_added_services_0_protection_scope", PROTECTION_SCOPE)
     fill_textarea(page, "#value_added_services_0_disclaimer", DISCLAIMER)
     fill_textarea(page, "#value_added_services_0_claim_process", CLAIM_PROCESS)
     
-    # 清空 special_intruction
+    # 3. Check checkboxes
     try:
-        page.fill("#value_added_services_0_special_intruction", "")
-    except: pass
-
-    # 4. 勾选所有选项
-    print("勾选所有选项...")
-    try:
-        # 用户路径: ... div:nth-child(3) ... div.ant-col.ant-col-10 ...
-        # 定位到第三个大块 (增值服务块?)
-        # 直接定位所有 checkbox 可能会误伤，限制在第三个卡片区域
+        print("勾选服务选项...")
+        # Need to be careful not to uncheck if already checked.
+        # Logic: check if not checked, then click.
+        # Reuse locator logic
         card3 = page.locator("div.goodsContainer___wtXQp form > div").nth(2)
-        
-        # 查找该区域内的所有 checkbox
         checkboxes = card3.locator(".ant-checkbox-wrapper:not(.ant-checkbox-wrapper-checked)").all()
         for cb in checkboxes:
             cb.click()
@@ -278,65 +332,15 @@ def handle_copy_page(page, original_id):
     except Exception as e:
         print(f"勾选选项失败: {e}")
 
-    # 5. SKU 编码输入
-    print("填写 SKU 编码...")
+    # 4. Submit
+    print("提交更新...")
     try:
-        # 用户路径: ... div.ant-table-tbody-virtual ... div:nth-child(13) ... input
-        # 定位虚拟表格容器
-        virtual_body = page.locator("div.ant-table-tbody-virtual")
-        if virtual_body.count() > 0:
-            # 这是一个虚拟列表
-            # 这里的难点是 div:nth-child(13) 是针对什么的？
-            # 假设是每行里的第13个 div (列)
-            
-            # 获取所有可见的行容器
-            # 通常虚拟列表的行是 .ant-table-row 或者直接是 div
-            # ant-table-tbody-virtual-holder-inner > div
-            
-            # 我们可以尝试直接查找符合特定层级的 input
-            # 用户给的层级非常深，我们可以尝试简化：
-            # 在 virtual_body 内部查找所有的 input
-            # 然后筛选出那些看起来像 SKU 编码的（或者全部填一遍，如果第13列是唯一的 input 列）
-            
-            # 让我们尝试定位每一行，然后找第13个格子
-            # 假设每行是一个 div (在 virtual-holder-inner 下)
-            rows = virtual_body.locator(".ant-table-tbody-virtual-holder-inner > div").all()
-            print(f"找到 {len(rows)} 个 SKU 行 (可见)")
-            
-            for row in rows:
-                # 尝试找第13个 div (列)
-                # 注意：nth-child 是 1-based，nth 是 0-based
-                # 用户说 div:nth-child(13)，所以是 index 12
-                col_13 = row.locator("> div").nth(12) 
-                input_el = col_13.locator("input")
-                
-                if input_el.count() > 0:
-                    rand_suffix = str(random.randint(10, 99))
-                    sku_val = f"{sku_prefix}_{rand_suffix}"
-                    input_el.fill(sku_val)
-        else:
-            # 普通表格 fallback
-            print("未检测到虚拟列表，尝试普通表格查找...")
-            inputs = card3.locator("table input[type='text']").all()
-            for inp in inputs:
-                rand_suffix = str(random.randint(10, 99))
-                sku_val = f"{sku_prefix}_{rand_suffix}"
-                inp.fill(sku_val)
-                
-    except Exception as e:
-        print(f"填写 SKU 失败: {e}")
-
-    # 6. 提交
-    print("提交表单...")
-    try:
-        # 用户路径: #formContainerWrap > div.footer___wSqtX > div:nth-child(1) > div:nth-child(1) > div > button
-        # 寻找 footer 下的按钮，通常是“提交”或“发布”
-        # 尝试点击最后一个按钮，或者包含“提交/发布”文本的按钮
         footer = page.locator("div.footer___wSqtX")
         submit_btn = footer.locator("button").last
         submit_btn.click()
         
-        # 等待提交完成
+        # Check for success
+        # Usually redirects back to list or shows toast
         page.wait_for_timeout(3000)
     except Exception as e:
         print(f"提交失败: {e}")
@@ -344,8 +348,8 @@ def handle_copy_page(page, original_id):
 def fill_textarea(page, selector, value):
     try:
         page.fill(selector, value)
-    except Exception as e:
-        print(f"填写 {selector} 失败: {e}")
+    except:
+        pass
 
 if __name__ == "__main__":
     main()

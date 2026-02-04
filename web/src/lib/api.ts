@@ -188,3 +188,38 @@ export async function updateConfig(key: string, value: string) {
   if (!res.ok) throw new Error("Failed to update config");
   return res.json();
 }
+
+export interface AutomationStatus {
+  status: "idle" | "running" | "waiting_for_captcha" | "finished" | "error";
+  message: string;
+  timestamp?: number;
+}
+
+export async function startAutomation(ids: string[], phone: string) {
+  const res = await fetch(`${API_BASE}/automation/alipay/update`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, phone }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.message || "Failed to start automation");
+  }
+  return res.json();
+}
+
+export async function getAutomationStatus(): Promise<AutomationStatus> {
+  const res = await fetch(`${API_BASE}/automation/status`, { cache: 'no-store' });
+  if (!res.ok) throw new Error("Failed to get status");
+  return res.json();
+}
+
+export async function submitCaptcha(code: string) {
+  const res = await fetch(`${API_BASE}/automation/captcha`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw new Error("Failed to submit captcha");
+  return res.json();
+}

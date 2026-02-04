@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense, useMemo, Fragment } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { GoodsItem, fetchGoods, prepareUpdate, triggerUpdate, fetchLogs, RentCurve, fetchRentCurves } from "@/lib/api";
+import { GoodsItem, fetchGoods, prepareUpdate, triggerUpdate, fetchLogs, RentCurve, fetchRentCurves, startAutomation, getAutomationStatus, submitCaptcha, AutomationStatus } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -50,6 +50,74 @@ function WorkbenchContent() {
     curves: RentCurve[];
     selectedCurve: string;
   }>({ open: false, targetIndex: -1, curves: [], selectedCurve: "" });
+
+  // 自动化任务状态
+  const [autoDialogOpen, setAutoDialogOpen] = useState(false);
+  const [autoPhone, setAutoPhone] = useState("");
+  const [autoStatus, setAutoStatus] = useState<AutomationStatus>({ status: "idle", message: "" });
+  const [captchaDialogOpen, setCaptchaDialogOpen] = useState(false);
+  const [captchaCode, setCaptchaCode] = useState("");
+  const [autoInterval, setAutoInterval] = useState<NodeJS.Timeout | null>(null);
+
+  // 清理轮询
+  useEffect(() => {
+    return () => {
+        if (autoInterval) clearInterval(autoInterval);
+    };
+  }, [autoInterval]);
+
+  const startPolling = () => {
+      if (autoInterval) clearInterval(autoInterval);
+      const interval = setInterval(async () => {
+          try {
+            const status = await getAutomationStatus();
+            setAutoStatus(status);
+            
+            // 如果正在等待验证码，且弹窗未打开，则打开
+            if (status.status === "waiting_for_captcha") {
+                setCaptchaDialogOpen(true);
+            }
+            
+            if (status.status === "finished" || status.status === "error") {
+                clearInterval(interval);
+                setAutoInterval(null);
+                if (status.status === "finished") toast.success("自动化更新任务完成");
+                else toast.error("任务出错: " + status.message);
+            }
+          } catch(e) {}
+      }, 1000);
+      setAutoInterval(interval);
+  };
+
+  const handleStartAutomation = async () => {
+      try {
+          // Extract unique IDs from current items
+          const uniqueIds = Array.from(new Set(items.map(i => i.ID)));
+          if (uniqueIds.length === 0) {
+              toast.error("当前没有商品");
+              return;
+          }
+          
+          await startAutomation(uniqueIds, autoPhone);
+          setAutoDialogOpen(false);
+          setAutoStatus({ status: "running", message: "启动中..." });
+          toast.success("自动化任务已启动，请留意浏览器窗口");
+          startPolling();
+      } catch (e: any) {
+          toast.error(e.message || "启动失败");
+      }
+  };
+
+  const handleSubmitCaptcha = async () => {
+      try {
+          await submitCaptcha(captchaCode);
+          setCaptchaDialogOpen(false);
+          setCaptchaCode("");
+          toast.success("验证码已提交");
+      } catch (e: any) {
+          toast.error(e.message);
+      }
+  };
 
   // 初始化加载选中数据
   useEffect(() => {
@@ -413,6 +481,10 @@ function WorkbenchContent() {
           <h1 className="text-xl font-bold">批量修改商品</h1>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setAutoDialogOpen(true)} disabled={autoStatus.status === "running" || autoStatus.status === "waiting_for_captcha"}>
+            <Wand2 className="mr-2 h-4 w-4" />
+            更新支付宝
+          </Button>
           <Button onClick={handleSaveAndRun} disabled={loading} className="gap-2">
             {loading ? <Play className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
             {loading ? "执行中..." : "保存并执行自动化更新"}
@@ -551,6 +623,59 @@ function WorkbenchContent() {
             </div>
             <DialogFooter>
                 <Button onClick={handleApplyCurve}>确认应用</Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={autoDialogOpen} onOpenChange={setAutoDialogOpen}>
+        <DialogContent>
+            <DialogHeader>
+                <DialogTitle>启动支付宝自动化更新</DialogTitle>
+            </DialogHeader>
+            <div className="py-4 space-y-4">
+                <p className="text-sm text-muted-foreground">
+                    即将启动浏览器自动化脚本，对当前列表中的商品进行支付宝信息更新。
+                    <br/>
+                    请确保已在 "支付宝编码" 列中填入了正确的商家侧编码。
+                </p>
+                <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right">登录手机号</Label>
+                    <Input 
+                        value={autoPhone}
+                        onChange={e => setAutoPhone(e.target.value)}
+                        placeholder="请输入用于接收验证码的手机号"
+                        className="col-span-3"
+                    />
+                </div>
+            </div>
+            <DialogFooter>
+                <Button onClick={handleStartAutomation}>启动任务</Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={captchaDialogOpen} onOpenChange={setCaptchaDialogOpen}>
+        <DialogContent>
+            <DialogHeader>
+                <DialogTitle>需要验证码</DialogTitle>
+            </DialogHeader>
+            <div className="py-4 space-y-4">
+                <p className="text-sm text-red-500 font-bold">
+                    脚本正在等待短信验证码登录，请查看手机并输入。
+                </p>
+                <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right">验证码</Label>
+                    <Input 
+                        value={captchaCode}
+                        onChange={e => setCaptchaCode(e.target.value)}
+                        placeholder="6位验证码"
+                        className="col-span-3"
+                        autoFocus
+                    />
+                </div>
+            </div>
+            <DialogFooter>
+                <Button onClick={handleSubmitCaptcha}>提交验证码</Button>
             </DialogFooter>
         </DialogContent>
       </Dialog>
