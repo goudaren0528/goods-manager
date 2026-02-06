@@ -99,5 +99,5 @@ Server 的 `data` 目录也挂载了 Volume，用于存储临时文件。
 如果报错 `could not find an available, non-overlapping IPv4 address pool`，说明默认网段被占用。
 
 处理方式：
-1. 在 `docker-compose.yml` 中给网络显式指定一个不冲突的子网，例如 `172.28.0.0/16`。
+1. 在 `docker-compose.yml` 中给网络显式指定一个不冲突的子网，例如 `10.88.0.0/16`。
 2. 重新部署 (Redeploy)。
