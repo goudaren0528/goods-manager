@@ -32,11 +32,12 @@
 1. 在项目下点击 "Compose"。
 2. 点击 "Create Compose"。
 3. 填写名称，例如 `goods-stack`。
-4. 选择 "Git" 作为来源。
+4. **Compose Type** 选择 **Docker Compose** (不要选 Stack，除非你用的是 Docker Swarm)。
+5. 选择 "Git" 作为来源。
    - **Repository URL**: 你的 Git 仓库地址。
    - **Branch**: `main` 或 `master`。
    - **Compose Path**: `docker-compose.yml` (默认即可)。
-5. 点击 "Create"。
+6. 点击 "Create"。
 
 ### 4. 环境变量配置 (Environment Variables)
 
@@ -93,3 +94,10 @@ Server 容器内置了 Playwright 和 Chromium。抓取任务在后台运行。
 ### 持久化存储
 Postgres 数据存储在 Docker Volume `postgres_data` 中，重启容器不会丢失数据。
 Server 的 `data` 目录也挂载了 Volume，用于存储临时文件。
+
+### Docker 网络冲突
+如果报错 `could not find an available, non-overlapping IPv4 address pool`，说明默认网段被占用。
+
+处理方式：
+1. 在 `docker-compose.yml` 中给网络显式指定一个不冲突的子网，例如 `172.28.0.0/16`。
+2. 重新部署 (Redeploy)。

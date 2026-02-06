@@ -14,6 +14,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - goods_network
 
   server:
     build: ./server
@@ -28,6 +30,8 @@ services:
       - ./server/data:/app/data
     ports:
       - "8000:8000"
+    networks:
+      - goods_network
 
   web:
     build: ./web
@@ -39,6 +43,15 @@ services:
       NEXT_PUBLIC_API_URL: http://localhost:8000
     ports:
       - "3000:3000"
+    networks:
+      - goods_network
 
 volumes:
   postgres_data:
+
+networks:
+  goods_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
