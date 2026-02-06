@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: goods
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d goods"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build: ./server
+    environment:
+      DATABASE_URL: postgresql://user:password@postgres:5432/goods
+      # For production, set HEADLESS=true for scraping
+      HEADLESS: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./server/data:/app/data
+    ports:
+      - "8000:8000"
+
+  web:
+    build: ./web
+    environment:
+      # In Docker network, server is at http://server:8000
+      # BUT for client-side fetches, we need the public URL.
+      # If using Nginx/Dokploy, this should be the public domain.
+      # For local docker-compose, localhost is fine.
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:

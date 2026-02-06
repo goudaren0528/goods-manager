@@ -10,13 +10,12 @@ from playwright.sync_api import sync_playwright
 from openpyxl.styles import PatternFill
 from openpyxl.utils.dataframe import dataframe_to_rows
 
-# 配置
-USERNAME = "伟填"
-PASSWORD = "Test0528."
-LOGIN_URL = "https://szguokuai.zlj.xyzulin.top/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods"
-MAX_PAGES = 0  # 最大抓取页数，设置 0 为不限制（抓取所有页）
-HEADLESS = True
-OUTPUT_FILE = "scrape_goods_data.json"
+USERNAME = os.getenv("GOODS_USERNAME", "伟填")
+PASSWORD = os.getenv("GOODS_PASSWORD", "Test0528.")
+LOGIN_URL = os.getenv("GOODS_LOGIN_URL", "https://szguokuai.zlj.xyzulin.top/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods")
+MAX_PAGES = int(os.getenv("GOODS_MAX_PAGES", "0"))
+HEADLESS = os.getenv("GOODS_HEADLESS", "true").lower() == "true"
+OUTPUT_FILE = os.getenv("GOODS_OUTPUT_FILE", "scrape_goods_data.json")
 
 def update_master_headers(master_headers, current_headers):
     """
@@ -107,6 +106,8 @@ def run_scraping():
         # --- 第一阶段：扫描列表页收集新ID ---
         ids_to_process = []
         scraped_sync_status = {}  # ID -> Sync Status
+        scraped_submit_time = {}  # ID -> 最近提交时间
+        scraped_image_url = {}  # ID -> 商品图片链接
         
         if target_ids:
             print("\n=== 指定ID模式：跳过列表扫描，直接处理指定ID ===")
@@ -140,8 +141,6 @@ def run_scraping():
                         if goods_id.isdigit():
                             current_page_ids.append(goods_id)
                             
-                            # 获取是否同步支付宝状态
-                            # selector: td:nth-child(13)
                             try:
                                 status_cell = row.query_selector("td:nth-child(13)")
                                 if status_cell:
@@ -150,6 +149,22 @@ def run_scraping():
                                     scraped_sync_status[goods_id] = "已同步" if status_text == "可售卖" else "未同步"
                             except Exception as e:
                                 print(f"  获取同步状态失败 (ID: {goods_id}): {e}")
+                            try:
+                                submit_cell = row.query_selector("td:nth-child(10) > span:nth-child(1)")
+                                if submit_cell:
+                                    submit_text = submit_cell.inner_text().strip()
+                                    if submit_text:
+                                        scraped_submit_time[goods_id] = submit_text
+                            except Exception as e:
+                                print(f"  获取最近提交时间失败 (ID: {goods_id}): {e}")
+                            try:
+                                img_el = row.query_selector("td:nth-child(4) > a > img")
+                                if img_el:
+                                    img_src = img_el.get_attribute("src") or ""
+                                    if img_src:
+                                        scraped_image_url[goods_id] = img_src
+                            except Exception as e:
+                                print(f"  获取商品图片失败 (ID: {goods_id}): {e}")
                 except:
                     pass
             
@@ -286,6 +301,8 @@ def run_scraping():
                                     row_data["商品名称"] = goods_name
                                     row_data["短标题"] = short_title
                                     row_data["是否同步支付宝"] = scraped_sync_status.get(goods_id, "未知")
+                                    row_data["最近提交时间"] = scraped_submit_time.get(goods_id, "")
+                                    row_data["商品图片"] = scraped_image_url.get(goods_id, "")
                                     row_data["1级分类"] = cate1
                                     row_data["2级分类"] = cate2
                                     row_data["3级分类"] = cate3
@@ -297,6 +314,8 @@ def run_scraping():
                                     "商品名称": goods_name,
                                     "短标题": short_title,
                                     "是否同步支付宝": scraped_sync_status.get(goods_id, "未知"),
+                                    "最近提交时间": scraped_submit_time.get(goods_id, ""),
+                                    "商品图片": scraped_image_url.get(goods_id, ""),
                                     "1级分类": cate1,
                                     "2级分类": cate2,
                                     "3级分类": cate3
@@ -345,7 +364,7 @@ def run_scraping():
     
     # 调整列顺序
     # 1. 基础列
-    base_cols = ["ID", "商品名称", "短标题", "是否同步支付宝", "1级分类", "2级分类", "3级分类", "SKU"]
+    base_cols = ["ID", "商品名称", "短标题", "是否同步支付宝", "最近提交时间", "商品图片", "1级分类", "2级分类", "3级分类", "SKU"]
     
     # 2. 动态列 (数据列)
     # 我们希望排除掉已经是 specs 的列，只保留数据列

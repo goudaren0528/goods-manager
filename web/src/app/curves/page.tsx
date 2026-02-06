@@ -9,12 +9,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Pencil, Trash2, Plus, Loader2 } from "lucide-react";
+import { Pencil, Trash2, Loader2 } from "lucide-react";
 import { RENT_DAYS } from "@/lib/utils";
 
 export default function CurvesPage() {
   const [curves, setCurves] = useState<RentCurve[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [editDialog, setEditDialog] = useState<{
     open: boolean;
     curve: RentCurve | null;
@@ -25,14 +25,28 @@ export default function CurvesPage() {
     try {
       const data = await fetchRentCurves();
       setCurves(data);
-    } catch (e) {
+    } catch {
       toast.error("加载曲线失败");
     }
     setLoading(false);
   };
 
   useEffect(() => {
-    loadCurves();
+    let active = true;
+    const initLoad = async () => {
+      try {
+        const data = await fetchRentCurves();
+        if (active) setCurves(data);
+      } catch {
+        if (active) toast.error("加载曲线失败");
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void initLoad();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleDelete = async (curve: RentCurve) => {
@@ -171,7 +185,7 @@ export default function CurvesPage() {
                 <Label className="text-right">曲线名称</Label>
                 <Input 
                   value={editDialog.curve.name} 
-                  onChange={e => setEditDialog(prev => prev.curve ? ({ ...prev.curve, name: e.target.value }) : prev)}
+                  onChange={e => setEditDialog(prev => prev.curve ? ({ ...prev, curve: { ...prev.curve, name: e.target.value } }) : prev)}
                   className="col-span-3"
                 />
               </div>
@@ -188,7 +202,7 @@ export default function CurvesPage() {
                           type="number" 
                           step="0.0001"
                           className="pl-5 text-center h-8 text-sm"
-                          value={editDialog.curve.multipliers[String(day)] || ""}
+                          value={editDialog.curve?.multipliers?.[String(day)] ?? ""}
                           onChange={e => handleMultiplierChange(String(day), e.target.value)}
                         />
                       </div>

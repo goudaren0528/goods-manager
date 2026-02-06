@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState, Fragment } from "react";
-import { GoodsGroup, fetchGoods, runScrape, runPartialScrape, fetchTaskStatus, API_BASE, EXPORT_URL, updateMerchant, fetchConfig, updateConfig, saveRentCurve, RentCurve, deleteGoods, stopTask, updateAlipayCode } from "@/lib/api";
+import { useCallback, useEffect, useState, Fragment, useRef, useMemo } from "react";
+import { GoodsGroup, GoodsItem, fetchGoods, runScrape, runPartialScrape, fetchTaskStatus, EXPORT_URL, updateMerchant, fetchConfig, updateConfig, saveRentCurve, deleteGoods, stopTask, updateAlipayCode } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { Loader2, ChevronRight, ChevronDown, ChevronLeft, Wand2, Trash2, XCircle } from "lucide-react";
+import { Loader2, ChevronRight, ChevronDown, ChevronLeft, Wand2, Trash2, XCircle, ArrowUpDown, Copy } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn, getRentInfo, RENT_DAYS } from "@/lib/utils";
 import {
@@ -24,55 +24,138 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
 function AlipayCodeInput({ id, initialValue }: { id: string; initialValue: string }) {
   const [value, setValue] = useState(initialValue);
   const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Sync with props if they change (e.g. after reload)
   useEffect(() => {
     setValue(initialValue);
   }, [initialValue]);
 
+  useEffect(() => {
+    if (editing) {
+      setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }, 0);
+    }
+  }, [editing]);
+
   const handleBlur = async () => {
-    if (value === initialValue) return;
+    if (value === initialValue) {
+      setEditing(false);
+      return;
+    }
     setLoading(true);
     try {
       await updateAlipayCode(id, value);
       toast.success("支付宝编码已更新");
-    } catch (e) {
+    } catch {
       toast.error("更新失败");
-      // Don't revert immediately, user might want to retry. 
-      // But for consistency we might want to revert or just show error.
-      // Reverting is safer for data consistency.
       setValue(initialValue);
     } finally {
       setLoading(false);
+      setEditing(false);
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.currentTarget.blur();
+    }
+    if (e.key === "Escape") {
+      setValue(initialValue);
+      setEditing(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!value) {
+      toast.error("暂无可复制的编码");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success("已复制");
+    } catch {
+      toast.error("复制失败");
     }
   };
 
   return (
-    <div className="relative">
-      <Input 
-        value={value} 
-        onChange={(e) => setValue(e.target.value)} 
-        onBlur={handleBlur}
-        onKeyDown={handleKeyDown}
-        className="h-8 w-full text-xs pr-6"
-        disabled={loading}
-        placeholder="输入编码"
-      />
-      {loading && <Loader2 className="h-3 w-3 absolute right-2 top-2.5 animate-spin text-muted-foreground" />}
+    <div className="flex items-center gap-1">
+      {editing ? (
+        <div className="relative w-full">
+          <Input 
+            ref={inputRef}
+            value={value} 
+            onChange={(e) => setValue(e.target.value)} 
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            className="h-8 w-full text-xs pr-6"
+            disabled={loading}
+            placeholder="输入编码"
+          />
+          {loading && <Loader2 className="h-3 w-3 absolute right-2 top-2.5 animate-spin text-muted-foreground" />}
+        </div>
+      ) : (
+        <>
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs flex-1 justify-start" onClick={() => setEditing(true)}>
+            {value ? value : "点击设置"}
+          </Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCopy} disabled={!value}>
+            <Copy className="h-3 w-3" />
+          </Button>
+        </>
+      )}
     </div>
   );
+}
+
+const PRODUCT_DICT = [
+  { label: "大疆 Osmo Pocket 3", keywords: ["pocket3", "pocket 3", "osmo pocket3", "osmo pocket 3", "大疆pocket3", "大疆pocket 3", "dji大疆pocket3"] },
+  { label: "大疆 Osmo Action 5 Pro", keywords: ["action5pro", "action 5 pro", "大疆action5pro", "osmo action5pro", "osmo action 5 pro"] },
+  { label: "富士 instax mini12", keywords: ["instax mini12", "mini12", "富士mini12", "mini 12"] },
+  { label: "富士 instax wide400", keywords: ["instax wide400", "wide400", "富士 wide400"] },
+  { label: "富士 instax wide300", keywords: ["instax wide300", "wide300", "富士 wide300"] },
+  { label: "富士 instax SQ1", keywords: ["square sq1", "sq1", "方形拍立得"] },
+  { label: "佳能 SX740HS", keywords: ["sx740hs", "佳能sx740hs"] },
+  { label: "佳能 R50", keywords: ["佳能 r50", "佳能r50", "r50"] },
+  { label: "佳能 CCD", keywords: ["ccd", "佳能ccd"] },
+  { label: "佳能 IXUS130", keywords: ["ixus130", "佳能ixus130"] },
+  { label: "vivo X200 Ultra", keywords: ["x200ultra", "x200 ultra", "vivox200ultra", "vivo x200 ultra"] },
+  { label: "vivo X300 Pro", keywords: ["x300pro", "x300 pro", "vivox300pro", "vivo x300 pro"] },
+  { label: "三星 Galaxy S23 Ultra", keywords: ["s23ultra", "s23 ultra", "galaxy s23 ultra", "三星galaxy s23ultra"] }
+];
+
+const BRAND_DICT = [
+  { label: "大疆", keywords: ["大疆", "dji"] },
+  { label: "富士", keywords: ["富士", "fujifilm", "instax"] },
+  { label: "佳能", keywords: ["佳能", "canon"] },
+  { label: "索尼", keywords: ["索尼", "sony"] },
+  { label: "尼康", keywords: ["尼康", "nikon"] },
+  { label: "vivo", keywords: ["vivo"] },
+  { label: "三星", keywords: ["三星", "samsung", "galaxy"] },
+  { label: "华为", keywords: ["华为", "huawei"] },
+  { label: "小米", keywords: ["小米", "xiaomi", "redmi"] },
+  { label: "GoPro", keywords: ["gopro"] },
+  { label: "Insta360", keywords: ["insta360"] }
+];
+
+function getProductLabel(name: string) {
+  const target = (name || "").toLowerCase();
+  for (const item of PRODUCT_DICT) {
+    if (item.keywords.some(k => target.includes(k))) return item.label;
+  }
+  for (const brand of BRAND_DICT) {
+    if (brand.keywords.some(k => target.includes(k))) return `${brand.label} 其他`;
+  }
+  return "其他";
 }
 
 export default function Home() {
@@ -85,7 +168,7 @@ export default function Home() {
   // 提取曲线状态
   const [extractDialogOpen, setExtractDialogOpen] = useState(false);
   const [extractCurveName, setExtractCurveName] = useState("");
-  const [extractSourceSku, setExtractSourceSku] = useState<any>(null);
+  const [extractSourceSku, setExtractSourceSku] = useState<GoodsItem | null>(null);
   const [previewCurve, setPreviewCurve] = useState<Record<string, number>>({});
 
   // 删除确认状态
@@ -100,11 +183,11 @@ export default function Home() {
   const [isFilterEnabled, setIsFilterEnabled] = useState(true);
   const [merchantFilter, setMerchantFilter] = useState("米奇");
   const [syncStatusFilter, setSyncStatusFilter] = useState("all");
+  const [productFilter, setProductFilter] = useState("全部");
 
   const [partialScrapeOpen, setPartialScrapeOpen] = useState(false);
   const [partialScrapeIds, setPartialScrapeIds] = useState("");
 
-  const [searchTerm, setSearchTerm] = useState("");
   const [taskStatus, setTaskStatus] = useState<{ running: boolean; task_name: string | null; message: string; progress: number }>({
     running: false,
     task_name: null,
@@ -115,6 +198,8 @@ export default function Home() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [total, setTotal] = useState(0);
+  const [sortBy, setSortBy] = useState<"ID" | "最近提交时间">("ID");
+  const [sortDesc, setSortDesc] = useState(false);
 
   // Load config on mount
   useEffect(() => {
@@ -128,7 +213,7 @@ export default function Home() {
     setLoading(true);
     try {
       const merchantParam = merchantFilter === "all" ? undefined : merchantFilter;
-      const res = await fetchGoods(page, pageSize, false, merchantParam, syncStatusFilter);
+      const res = await fetchGoods(page, pageSize, false, merchantParam, syncStatusFilter, sortBy, sortDesc);
       setGoods(Array.isArray(res.data) ? res.data : []);
       setTotal(typeof res.total === "number" ? res.total : 0);
     } catch (e) {
@@ -137,7 +222,7 @@ export default function Home() {
       setTotal(0);
     }
     setLoading(false);
-  }, [page, pageSize, merchantFilter, syncStatusFilter]);
+  }, [page, pageSize, merchantFilter, syncStatusFilter, sortBy, sortDesc]);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -256,7 +341,7 @@ export default function Home() {
   const PRICE_COLS = ["市场价", "押金", "购买价", "采购价"];
 
   // 过滤后的数据
-  const filteredGoods = goods.filter(group => {
+  const keywordFilteredGoods = goods.filter(group => {
     if (!isFilterEnabled || !filterKeywords) return true;
     
     // 分割关键字，去除空白
@@ -273,9 +358,35 @@ export default function Home() {
     return true;
   });
 
+  const productCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    keywordFilteredGoods.forEach(g => {
+      const label = getProductLabel(g.商品名称 || "");
+      counts.set(label, (counts.get(label) || 0) + 1);
+    });
+    return counts;
+  }, [keywordFilteredGoods]);
+
+  const productCards = useMemo((): Array<{ label: string; count: number }> => {
+    const knownLabels = new Set(PRODUCT_DICT.map(d => d.label));
+    const primary = PRODUCT_DICT.map(d => ({ label: d.label, count: productCounts.get(d.label) || 0 }))
+      .filter(i => i.count > 0);
+    const extra = Array.from(productCounts.entries())
+      .filter(([label]) => !knownLabels.has(label))
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "zh-Hans-CN"));
+    const others = extra.filter(i => i.label !== "其他");
+    const tail = extra.find(i => i.label === "其他");
+    return tail ? [...primary, ...others, tail] : [...primary, ...others];
+  }, [productCounts]);
+
+  const filteredGoods = keywordFilteredGoods.filter(group => {
+    if (productFilter === "全部") return true;
+    return getProductLabel(group.商品名称 || "") === productFilter;
+  });
 
 
-  const handleExtractCurve = (sku: any) => {
+  const handleExtractCurve = (sku: GoodsItem) => {
     // 1. 验证必须包含的租期
     const requiredDays = [1, 3, 5, 7, 15, 30, 60, 90];
     const missingDays = requiredDays.filter(d => {
@@ -524,6 +635,28 @@ export default function Home() {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant={productFilter === "全部" ? "default" : "outline"}
+          size="sm"
+          className="h-8 text-xs"
+          onClick={() => setProductFilter("全部")}
+        >
+          全部({keywordFilteredGoods.length})
+        </Button>
+        {productCards.map(item => (
+          <Button
+            key={item.label}
+            variant={productFilter === item.label ? "default" : "outline"}
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => setProductFilter(item.label)}
+          >
+            {item.label}({item.count})
+          </Button>
+        ))}
+      </div>
+
       {taskStatus.running && (
         <div className="w-full flex items-center gap-2 px-1">
             <span className="text-sm text-muted-foreground whitespace-nowrap">
@@ -553,11 +686,50 @@ export default function Home() {
                 />
               </TableHead>
               <TableHead className="w-[30px] px-1"></TableHead>
-              <TableHead className="w-[60px] px-1">ID</TableHead>
+              <TableHead className="w-[60px] px-1">
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-6 px-1 text-xs w-full justify-start"
+                  onClick={() => {
+                    if (sortBy === "ID") {
+                      setSortDesc(prev => !prev);
+                    } else {
+                      setSortBy("ID");
+                      setSortDesc(false);
+                    }
+                    setPage(1);
+                  }}
+                >
+                  ID
+                  <ArrowUpDown className={cn("ml-1 h-3 w-3", sortBy === "ID" && sortDesc ? "rotate-180" : "", sortBy !== "ID" && "opacity-40")} />
+                </Button>
+              </TableHead>
+              <TableHead className="w-[60px] px-1">图片</TableHead>
               <TableHead className="w-[75px] px-1">商家</TableHead>
               <TableHead className="w-[120px] px-1">支付宝编码</TableHead>
+              <TableHead className="w-[140px] px-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-1 text-xs w-full justify-start"
+                  onClick={() => {
+                    if (sortBy === "最近提交时间") {
+                      setSortDesc(prev => !prev);
+                    } else {
+                      setSortBy("最近提交时间");
+                      setSortDesc(false);
+                    }
+                    setPage(1);
+                  }}
+                >
+                  最近提交时间
+                  <ArrowUpDown className={cn("ml-1 h-3 w-3", sortBy === "最近提交时间" && sortDesc ? "rotate-180" : "", sortBy !== "最近提交时间" && "opacity-40")} />
+                </Button>
+              </TableHead>
               <TableHead className="w-[70px] px-1">同步状态</TableHead>
               <TableHead className="w-[150px] px-1">商品名称</TableHead>
+              <TableHead className="w-[140px] px-1">品牌型号</TableHead>
               <TableHead className="w-[120px] px-1">分类</TableHead>
               <TableHead className="w-[60px] px-1 text-right">总库存</TableHead>
               <TableHead className="w-[50px] px-1 text-right">操作</TableHead>
@@ -566,7 +738,7 @@ export default function Home() {
           <TableBody>
             {filteredGoods.length === 0 ? (
                 <TableRow>
-                    <TableCell colSpan={9} className="text-center h-24 text-muted-foreground">
+                    <TableCell colSpan={12} className="text-center h-24 text-muted-foreground">
                         {loading ? "加载中..." : (isFilterEnabled && goods.length > 0 ? "所有商品均已被关键字过滤" : "暂无数据")}
                     </TableCell>
                 </TableRow>
@@ -591,6 +763,17 @@ export default function Home() {
                         {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                       </TableCell>
                       <TableCell className="font-medium font-mono px-1 py-1 text-xs">{group.ID}</TableCell>
+                      <TableCell className="px-1 py-1">
+                        {group.商品图片 ? (
+                          <img
+                            src={group.商品图片}
+                            alt={group.商品名称 || group.ID}
+                            className="h-8 w-8 rounded object-cover"
+                          />
+                        ) : (
+                          <span className="text-xs text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()} className="px-1 py-1">
                         <Select 
                             value={group.merchant || "米奇"} 
@@ -609,6 +792,9 @@ export default function Home() {
                       <TableCell className="px-1 py-1">
                           <AlipayCodeInput id={group.ID} initialValue={group.支付宝编码 || ""} />
                       </TableCell>
+                      <TableCell className="px-1 py-1 text-xs text-muted-foreground whitespace-nowrap">
+                        {group.最近提交时间 || "-"}
+                      </TableCell>
                       <TableCell className="px-1 py-1">
                         <span className={cn(
                             "px-1 py-0.5 rounded text-[10px] font-medium whitespace-nowrap",
@@ -624,6 +810,9 @@ export default function Home() {
                             <span className="font-medium truncate text-xs" title={group.商品名称}>{group.商品名称}</span>
                             {group.短标题 && <span className="text-[10px] text-muted-foreground truncate" title={group.短标题}>{group.短标题}</span>}
                         </div>
+                      </TableCell>
+                      <TableCell className="px-1 py-1 text-xs font-medium">
+                        {getProductLabel(group.商品名称 || "")}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground max-w-[120px] truncate px-1 py-1" title={[group["1级分类"], group["2级分类"], group["3级分类"]].filter(Boolean).join(" / ")}>
                         {[group["1级分类"], group["2级分类"], group["3级分类"]].filter(Boolean).join(" / ")}
@@ -648,7 +837,7 @@ export default function Home() {
                     
                     {isExpanded && (
                         <TableRow className="bg-muted/10 hover:bg-muted/10">
-                            <TableCell colSpan={9} className="p-0">
+                            <TableCell colSpan={12} className="p-0">
                                 <div className="p-4 bg-muted/20 border-b shadow-inner">
                                     <Table className="w-full text-xs border bg-background">
                                         <TableHeader>
@@ -749,5 +938,3 @@ export default function Home() {
     </div>
   );
 }
-
-// ChevronLeft imported from lucide-react

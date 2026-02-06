@@ -1,22 +1,122 @@
 "use client";
 
-import { useEffect, useState, Suspense, useMemo, Fragment } from "react";
+import { useEffect, useState, Suspense, useMemo, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { GoodsItem, fetchGoods, prepareUpdate, triggerUpdate, fetchLogs, RentCurve, fetchRentCurves, startAutomation, getAutomationStatus, submitCaptcha, AutomationStatus } from "@/lib/api";
+import { GoodsItem, fetchGoods, prepareUpdate, triggerUpdate, fetchLogs, fetchTaskStatus, updateAlipayCode, RentCurve, fetchRentCurves, startAutomation, getAutomationStatus, submitCaptcha, stopTask, AutomationStatus } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { ArrowLeft, Save, Play, Trash2, Copy, Settings2, Plus, Info, Calculator, Wand2 } from "lucide-react";
+import { ArrowLeft, Play, Trash2, Copy, Settings2, Calculator, Wand2, Loader2 } from "lucide-react";
 import { getRentInfo, RENT_DAYS } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+function AlipayCodeInput({
+  id,
+  initialValue,
+  onUpdated
+}: {
+  id: string;
+  initialValue: string;
+  onUpdated: (value: string) => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setValue(initialValue);
+  }, [initialValue]);
+
+  useEffect(() => {
+    if (editing) {
+      setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }, 0);
+    }
+  }, [editing]);
+
+  const handleBlur = async () => {
+    if (value === initialValue) {
+      setEditing(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      await updateAlipayCode(id, value);
+      onUpdated(value);
+      toast.success("支付宝编码已更新");
+    } catch {
+      toast.error("更新失败");
+      setValue(initialValue);
+    } finally {
+      setLoading(false);
+      setEditing(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.currentTarget.blur();
+    }
+    if (e.key === "Escape") {
+      setValue(initialValue);
+      setEditing(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!value) {
+      toast.error("暂无可复制的编码");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success("已复制");
+    } catch {
+      toast.error("复制失败");
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-1">
+      {editing ? (
+        <div className="relative w-full">
+          <Input
+            ref={inputRef}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            className="h-7 w-full text-xs pr-6"
+            disabled={loading}
+            placeholder="输入编码"
+          />
+          {loading && <Loader2 className="h-3 w-3 absolute right-2 top-2 animate-spin text-muted-foreground" />}
+        </div>
+      ) : (
+        <>
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs flex-1 justify-start" onClick={() => setEditing(true)}>
+            {value ? value : "点击设置"}
+          </Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCopy} disabled={!value}>
+            <Copy className="h-3 w-3" />
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
 
 function WorkbenchContent() {
   const router = useRouter();
@@ -66,7 +166,7 @@ function WorkbenchContent() {
     };
   }, [autoInterval]);
 
-  const startPolling = () => {
+  const startPolling = useCallback(() => {
       if (autoInterval) clearInterval(autoInterval);
       const interval = setInterval(async () => {
           try {
@@ -84,10 +184,23 @@ function WorkbenchContent() {
                 if (status.status === "finished") toast.success("自动化更新任务完成");
                 else toast.error("任务出错: " + status.message);
             }
-          } catch(e) {}
+          } catch {}
       }, 1000);
       setAutoInterval(interval);
-  };
+  }, [autoInterval]);
+
+  useEffect(() => {
+      const init = async () => {
+          try {
+              const status = await getAutomationStatus();
+              setAutoStatus(status);
+              if (status.status === "running" || status.status === "waiting_for_captcha") {
+                  startPolling();
+              }
+          } catch {}
+      };
+      init();
+  }, [startPolling]);
 
   const handleStartAutomation = async () => {
       try {
@@ -103,8 +216,9 @@ function WorkbenchContent() {
           setAutoStatus({ status: "running", message: "启动中..." });
           toast.success("自动化任务已启动，请留意浏览器窗口");
           startPolling();
-      } catch (e: any) {
-          toast.error(e.message || "启动失败");
+      } catch (error) {
+          const message = error instanceof Error ? error.message : "启动失败";
+          toast.error(message);
       }
   };
 
@@ -114,10 +228,27 @@ function WorkbenchContent() {
           setCaptchaDialogOpen(false);
           setCaptchaCode("");
           toast.success("验证码已提交");
-      } catch (e: any) {
-          toast.error(e.message);
+      } catch (error) {
+          const message = error instanceof Error ? error.message : "验证码提交失败";
+          toast.error(message);
       }
   };
+
+  const handleStopAutomation = async () => {
+      try {
+          await stopTask();
+          toast.success("已发送中止请求");
+      } catch (error) {
+          const message = error instanceof Error ? error.message : "中止失败";
+          toast.error(message);
+      }
+  };
+
+  const total = autoStatus.total ?? 0;
+  const processed = autoStatus.processed ?? 0;
+  const successCount = autoStatus.success_count ?? 0;
+  const errorCount = autoStatus.error_count ?? 0;
+  const progress = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
 
   // 初始化加载选中数据
   useEffect(() => {
@@ -136,7 +267,7 @@ function WorkbenchContent() {
         const selectedGroups = allGroups.filter(g => ids.includes(g.ID));
         const allSkus = selectedGroups.flatMap(g => g.skus);
         setItems(allSkus);
-      } catch (e) {
+      } catch {
         toast.error("加载商品数据失败");
       }
     };
@@ -149,13 +280,6 @@ function WorkbenchContent() {
       if (logInterval) clearInterval(logInterval);
     };
   }, [logInterval]);
-
-  const loadLogs = async () => {
-    try {
-      const res = await fetchLogs();
-      setLogs(res.logs);
-    } catch (e) {}
-  };
 
   const rentCols = RENT_DAYS.map(d => `${d}天租金`);
   const priceCols = ["市场价", "押金", "购买价", "采购价"];
@@ -354,11 +478,28 @@ function WorkbenchContent() {
       await triggerUpdate();
       
       // 3. 开始轮询日志
-      const interval = setInterval(loadLogs, 1000);
+      const interval = setInterval(async () => {
+        try {
+          const [res, status] = await Promise.all([fetchLogs(), fetchTaskStatus()]);
+          setLogs(res.logs);
+          if (!status.running) {
+            clearInterval(interval);
+            setLogInterval(null);
+            setLoading(false);
+            const message = status.message || "更新任务已结束";
+            if (message.includes("Error") || message.includes("失败")) {
+              toast.error(message);
+            } else {
+              toast.success(message);
+            }
+          }
+        } catch {}
+      }, 1000);
       setLogInterval(interval);
       
     } catch (e) {
-      toast.error("启动更新失败: " + String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      toast.error(`启动更新失败：${message}`);
       setLoading(false);
     }
   };
@@ -376,7 +517,7 @@ function WorkbenchContent() {
             curves,
             selectedCurve: curves[0].name
         });
-    } catch (e) {
+    } catch {
         toast.error("加载曲线失败");
     }
   };
@@ -397,13 +538,11 @@ function WorkbenchContent() {
         return;
     }
 
-    let updatedCount = 0;
     Object.entries(curve.multipliers).forEach(([day, multiplier]) => {
         const key = `${day}天租金`;
         const newRent = Math.round(baseRent * multiplier);
         // Only update if the key is a valid rent column (though all should be if defined in RENT_DAYS)
         item[key] = newRent.toString();
-        updatedCount++;
     });
 
     newItems[targetIndex] = item;
@@ -492,6 +631,27 @@ function WorkbenchContent() {
         </div>
       </div>
 
+      {(autoStatus.status === "running" || autoStatus.status === "waiting_for_captcha") && (
+        <div className="flex items-center gap-3 px-1">
+          <span className="text-sm text-muted-foreground whitespace-nowrap">{autoStatus.message}</span>
+          <div className="flex items-center gap-2 min-w-[220px]">
+            <Progress value={progress} className="h-2 w-36" />
+            <span className="text-xs text-muted-foreground whitespace-nowrap">{progress}%</span>
+          </div>
+          <div className="text-xs text-muted-foreground whitespace-nowrap">
+            {processed}/{total} 成功 {successCount} 失败 {errorCount}
+          </div>
+          {(autoStatus.current_id || autoStatus.current_code) && (
+            <div className="text-xs text-muted-foreground whitespace-nowrap">
+              当前: {autoStatus.current_id || "-"} / {autoStatus.current_code || "-"}
+            </div>
+          )}
+          <Button variant="destructive" size="sm" className="h-7 px-2 text-xs" onClick={handleStopAutomation}>
+            中止任务
+          </Button>
+        </div>
+      )}
+
       <Dialog open={isSpecDialogOpen} onOpenChange={setIsSpecDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -519,7 +679,7 @@ function WorkbenchContent() {
             <p className="text-xs text-muted-foreground">
               提示：支持输入多个规格值（用逗号分隔），将为每个值生成一行新数据。
               <br />
-              例如输入 "红色, 蓝色"，原来的每一行都会分裂成两行。
+              例如输入 &quot;红色, 蓝色&quot;，原来的每一行都会分裂成两行。
             </p>
           </div>
           <DialogFooter>
@@ -618,7 +778,7 @@ function WorkbenchContent() {
                     </Select>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                    将根据该商品的 "1天租金" 和选定曲线的比例，自动计算并填充其他天数的租金。
+                    将根据该商品的 &quot;1天租金&quot; 和选定曲线的比例，自动计算并填充其他天数的租金。
                 </p>
             </div>
             <DialogFooter>
@@ -636,7 +796,7 @@ function WorkbenchContent() {
                 <p className="text-sm text-muted-foreground">
                     即将启动浏览器自动化脚本，对当前列表中的商品进行支付宝信息更新。
                     <br/>
-                    请确保已在 "支付宝编码" 列中填入了正确的商家侧编码。
+                    请确保已在 &quot;支付宝编码&quot; 列中填入了正确的商家侧编码。
                 </p>
                 <div className="grid grid-cols-4 items-center gap-4">
                     <Label className="text-right">登录手机号</Label>
@@ -807,11 +967,10 @@ function WorkbenchContent() {
                                                     />
                                                 </TableCell>
                                                 <TableCell className="border-r p-1">
-                                                    <Input 
-                                                        className="h-7 text-xs px-2" 
-                                                        value={item.支付宝编码 || ""} 
-                                                        onChange={(e) => handleFieldChange(globalIndex, "支付宝编码", e.target.value)}
-                                                        title={item.支付宝编码}
+                                                    <AlipayCodeInput
+                                                        id={String(item.ID)}
+                                                        initialValue={typeof item.支付宝编码 === "string" ? item.支付宝编码 : String(item.支付宝编码 ?? "")}
+                                                        onUpdated={(value) => handleFieldChange(globalIndex, "支付宝编码", value)}
                                                     />
                                                 </TableCell>
                                                 <TableCell className="border-r p-1">

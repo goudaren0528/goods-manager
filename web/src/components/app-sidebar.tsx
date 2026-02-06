@@ -46,6 +46,10 @@ const data = {
           url: "/",
         },
         {
+          title: "商品数据",
+          url: "/goods-data",
+        },
+        {
           title: "租金曲线配置",
           url: "/curves",
         },

@@ -6,13 +6,11 @@ import datetime
 
 import sys
 
-# 配置
-USERNAME = "伟填"
-PASSWORD = "Test0528."
-LOGIN_URL = "https://szguokuai.zlj.xyzulin.top/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods"
-# 默认数据文件，可以通过命令行参数覆盖
-DATA_FILE = sys.argv[1] if len(sys.argv) > 1 else "update_goods_data.json"
-HEADLESS = True
+USERNAME = os.getenv("GOODS_USERNAME", "伟填")
+PASSWORD = os.getenv("GOODS_PASSWORD", "Test0528.")
+LOGIN_URL = os.getenv("GOODS_LOGIN_URL", "https://szguokuai.zlj.xyzulin.top/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods")
+DATA_FILE = sys.argv[1] if len(sys.argv) > 1 else os.getenv("GOODS_UPDATE_DATA_FILE", "update_goods_data.json")
+HEADLESS = os.getenv("GOODS_HEADLESS", "true").lower() == "true"
 
 def log_update(message):
     """记录更新日志"""

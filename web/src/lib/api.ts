@@ -52,6 +52,8 @@ export interface GoodsGroup {
   skus: GoodsItem[];
   merchant?: string;
   是否同步支付宝?: string;
+  最近提交时间?: string;
+  商品图片?: string;
   支付宝编码?: string;
 }
 
@@ -66,7 +68,7 @@ export interface FetchGoodsResponse {
   total_pages: number;
 }
 
-export async function fetchGoods(page: number, limit: number, allData = false, merchant?: string, syncStatus?: string): Promise<FetchGoodsResponse> {
+export async function fetchGoods(page: number, limit: number, allData = false, merchant?: string, syncStatus?: string, sortBy?: string, sortDesc?: boolean): Promise<FetchGoodsResponse> {
   const params = new URLSearchParams({
     page: page.toString(),
     limit: limit.toString(),
@@ -74,6 +76,8 @@ export async function fetchGoods(page: number, limit: number, allData = false, m
   });
   if (merchant) params.append("merchant", merchant);
   if (syncStatus) params.append("sync_status", syncStatus);
+  if (sortBy) params.append("sort_by", sortBy);
+  if (sortDesc !== undefined) params.append("sort_desc", sortDesc ? "true" : "false");
 
   const res = await fetch(`${API_BASE}/goods?${params.toString()}`, { cache: 'no-store' });
   if (!res.ok) throw new Error("Failed to fetch goods");
@@ -106,10 +110,15 @@ export const prepareUpdate = async (items: Partial<GoodsItem>[]): Promise<Record
   const res = await fetch(`${API_BASE}/prepare-update`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(items),
+    body: JSON.stringify({ items }),
   });
   if (!res.ok) {
-    throw new Error("Failed to prepare update data");
+    try {
+      const err = await res.json();
+      throw new Error(err.message || "Failed to prepare update data");
+    } catch {
+      throw new Error("Failed to prepare update data");
+    }
   }
   return res.json();
 }
@@ -193,6 +202,13 @@ export interface AutomationStatus {
   status: "idle" | "running" | "waiting_for_captcha" | "finished" | "error";
   message: string;
   timestamp?: number;
+  total?: number;
+  processed?: number;
+  success_count?: number;
+  error_count?: number;
+  current_id?: string;
+  current_code?: string;
+  step?: string;
 }
 
 export async function startAutomation(ids: string[], phone: string) {
