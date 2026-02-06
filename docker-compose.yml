@@ -50,3 +50,6 @@ volumes:
 networks:
   goods_network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 10.90.0.0/16
