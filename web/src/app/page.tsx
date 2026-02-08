@@ -237,8 +237,14 @@ export default function Home() {
         const status = await fetchTaskStatus();
         setTaskStatus(prev => {
           if (prev.running && !status.running) {
-            toast.success("任务已完成，正在刷新数据...");
-            loadData(true);
+            const message = status.message || "";
+            const failed = /error|failed|terminated|异常|失败|错误|return code\s*[1-9]\d*/i.test(message);
+            if (failed) {
+              toast.error(`任务失败: ${message || "未知原因"}`);
+            } else {
+              toast.success("任务已完成，正在刷新数据...");
+              loadData(true);
+            }
           }
           return status;
         });

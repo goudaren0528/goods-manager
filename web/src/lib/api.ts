@@ -116,7 +116,11 @@ export const runScrape = async (): Promise<Record<string, unknown>> => {
   if (!res.ok) {
     throw new Error("Failed to run scrape");
   }
-  return res.json();
+  const data = await res.json();
+  if ((data as { status?: string; message?: string }).status === "error") {
+    throw new Error((data as { message?: string }).message || "Failed to run scrape");
+  }
+  return data;
 };
 
 export const runPartialScrape = async (ids: string[]): Promise<Record<string, unknown>> => {
@@ -128,7 +132,11 @@ export const runPartialScrape = async (ids: string[]): Promise<Record<string, un
   if (!res.ok) {
     throw new Error("Failed to run partial scrape");
   }
-  return res.json();
+  const data = await res.json();
+  if ((data as { status?: string; message?: string }).status === "error") {
+    throw new Error((data as { message?: string }).message || "Failed to run partial scrape");
+  }
+  return data;
 };
 
 export const prepareUpdate = async (items: Partial<GoodsItem>[]): Promise<Record<string, unknown>> => {
@@ -152,7 +160,11 @@ export async function triggerUpdate() {
   const res = await fetch(`${API_BASE}/trigger-update`, {
     method: "POST",
   });
-  return res.json();
+  const data = await res.json();
+  if ((data as { status?: string; message?: string }).status === "error") {
+    throw new Error((data as { message?: string }).message || "Failed to trigger update");
+  }
+  return data;
 }
 
 export const fetchLogs = async (): Promise<{ logs: string }> => {
@@ -176,7 +188,11 @@ export async function stopTask() {
     method: "POST",
   });
   if (!res.ok) throw new Error("Failed to stop task");
-  return res.json();
+  const data = await res.json();
+  if ((data as { status?: string; message?: string }).status === "error") {
+    throw new Error((data as { message?: string }).message || "Failed to stop task");
+  }
+  return data;
 }
 
 export async function updateMerchant(id: string, merchant: string) {

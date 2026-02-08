@@ -148,11 +148,14 @@ def run_process_with_logging(cmd, cwd, log_file, task_type):
                     update_task_status(True, task_type, line_text, TASK_STATUS.get("progress", 0))
         
         process.wait()
-        
-        update_task_status(False, task_type, f"Task finished with return code {process.returncode}", 100)
+        returncode = process.returncode
+        if returncode == 0:
+            update_task_status(False, task_type, "Task completed", 100)
+        else:
+            update_task_status(False, task_type, f"Task failed with return code {returncode}", 100)
         with TASK_LOCK:
             CURRENT_TASK_PROCESS = None
-            
+        return returncode
     except Exception as e:
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(f"\nError executing process: {e}\n")
@@ -160,6 +163,7 @@ def run_process_with_logging(cmd, cwd, log_file, task_type):
         update_task_status(False, task_type, f"Error: {e}", 0)
         with TASK_LOCK:
             CURRENT_TASK_PROCESS = None
+        return -1
 
 init_db()
 
@@ -538,7 +542,9 @@ def run_scrape():
     cmd = [sys.executable, "-u", SCRAPE_SCRIPT_PATH]
 
     def task_thread():
-        run_process_with_logging(cmd, BASE_DIR, TASK_LOG_PATH, "scrape")
+        returncode = run_process_with_logging(cmd, BASE_DIR, TASK_LOG_PATH, "scrape")
+        if returncode != 0:
+            return
         try:
             updated = merge_scraped_data(SCRAPE_OUTPUT_FILE)
             update_task_status(False, "scrape", f"Scrape completed, updated {updated} goods", 100)
@@ -563,7 +569,9 @@ def run_partial_scrape(req: PartialScrapeRequest):
     cmd = [sys.executable, "-u", SCRAPE_SCRIPT_PATH, "--target-ids", ",".join(clean_ids)]
 
     def task_thread():
-        run_process_with_logging(cmd, BASE_DIR, TASK_LOG_PATH, "scrape_partial")
+        returncode = run_process_with_logging(cmd, BASE_DIR, TASK_LOG_PATH, "scrape_partial")
+        if returncode != 0:
+            return
         try:
             updated = merge_scraped_data(SCRAPE_OUTPUT_FILE)
             update_task_status(False, "scrape_partial", f"Partial scrape completed, updated {updated} goods", 100)
