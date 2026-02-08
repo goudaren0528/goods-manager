@@ -60,7 +60,7 @@ export interface GoodsGroup {
 const isServer = typeof window === 'undefined';
 
 const getClientApiBase = () => {
-  const url = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const url = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").trim();
   // If running in browser and URL is relative or HTTP but page is HTTPS, upgrade to HTTPS if needed
   if (!isServer && window.location.protocol === 'https:' && url.startsWith('http:')) {
     return url.replace('http:', 'https:');

@@ -5,14 +5,24 @@ const nextConfig: NextConfig = {
   output: "standalone",
   reactCompiler: true,
   async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: process.env.INTERNAL_API_URL 
-          ? `${process.env.INTERNAL_API_URL}/:path*` 
-          : 'http://server:8000/:path*', // Proxy to backend
-      },
-    ]
+    return {
+      afterFiles: [
+        {
+          source: '/api/:path*',
+          destination: process.env.INTERNAL_API_URL 
+            ? `${process.env.INTERNAL_API_URL}/:path*` 
+            : 'http://server:8000/:path*', // Proxy to backend
+        },
+      ],
+      fallback: [
+        {
+          source: '/:path*',
+          destination: process.env.INTERNAL_API_URL 
+            ? `${process.env.INTERNAL_API_URL}/:path*` 
+            : 'http://server:8000/:path*', // Proxy all other requests to backend
+        },
+      ],
+    }
   },
 };
 
