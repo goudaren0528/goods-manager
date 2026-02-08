@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   output: "standalone",
   reactCompiler: true,
   async rewrites() {
-    const rawUrl = process.env.INTERNAL_API_URL || "http://server:8000";
+    const rawUrl = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://server:8000";
     const cleanUrl = rawUrl.replace(/^["'`]|["'`]$/g, "").trim();
     const destination = `${cleanUrl}/:path*`;
     

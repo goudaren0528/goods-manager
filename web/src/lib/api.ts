@@ -59,9 +59,11 @@ export interface GoodsGroup {
 
 const isServer = typeof window === 'undefined';
 
+const cleanEnvUrl = (value: string) => value.replace(/^`|`$/g, "").replace(/^"|"$/g, "").replace(/^'|'$/g, "").trim();
+
 const getClientApiBase = () => {
   const raw = (process.env.NEXT_PUBLIC_API_URL || "").trim();
-  const cleaned = raw.replace(/^`|`$/g, "").replace(/^"|"$/g, "").replace(/^'|'$/g, "").trim();
+  const cleaned = cleanEnvUrl(raw);
   if (!cleaned) return "/api";
   let url = cleaned;
   if (!isServer && window.location.protocol === "https:" && url.startsWith("http:")) {
@@ -80,9 +82,15 @@ const getClientApiBase = () => {
   return url.replace(/\/+$/, "");
 };
 
-export const API_BASE = isServer
-  ? (process.env.INTERNAL_API_URL || "http://server:8000")
-  : getClientApiBase();
+const getServerApiBase = () => {
+  const internal = cleanEnvUrl(process.env.INTERNAL_API_URL || "");
+  if (internal) return internal.replace(/\/+$/, "");
+  const publicUrl = cleanEnvUrl(process.env.NEXT_PUBLIC_API_URL || "");
+  if (publicUrl) return publicUrl.replace(/\/+$/, "");
+  return "http://server:8000";
+};
+
+export const API_BASE = isServer ? getServerApiBase() : getClientApiBase();
 export const EXPORT_URL = `${API_BASE}/export-excel`;
 
 export interface FetchGoodsResponse {
