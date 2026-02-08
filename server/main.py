@@ -113,14 +113,18 @@ def run_process_with_logging(cmd, cwd, log_file, task_type):
         f.write("-" * 50 + "\n")
 
     try:
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        
         process = subprocess.Popen(
             cmd,
             cwd=cwd,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
-            encoding=locale.getpreferredencoding(False),
+            encoding="utf-8",
             errors="replace"
         )
         

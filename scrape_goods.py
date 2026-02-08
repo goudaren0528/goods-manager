@@ -586,7 +586,14 @@ def parse_sku_table(sku_table, master_headers):
 if __name__ == "__main__":
     try:
         run_scraping()
+        print("所有操作已完成，脚本正常退出。")
+        sys.exit(0)
+    except SystemExit as e:
+        if e.code != 0:
+            print(f"捕获到 SystemExit, code={e.code}")
+        raise
     except Exception as e:
         print(f"主流程异常退出: {e}")
         import traceback
         traceback.print_exc()
+        sys.exit(1)
