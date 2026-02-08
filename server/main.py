@@ -285,11 +285,11 @@ def get_goods(
                     sort_expr = "CASE WHEN \"ID\" GLOB '[0-9]*' THEN CAST(\"ID\" AS INTEGER) ELSE NULL END"
 
             id_query = f"""
-                SELECT \"ID\", {sort_expr} AS sort_value
+                SELECT \"ID\"
                 FROM goods
                 {where_sql}
                 GROUP BY \"ID\"
-                ORDER BY (sort_value IS NULL) ASC, sort_value {order}, \"ID\" {order}
+                ORDER BY ({sort_expr} IS NULL) ASC, {sort_expr} {order}, \"ID\" {order}
             """
             
             id_params = params.copy()
