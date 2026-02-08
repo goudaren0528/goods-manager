@@ -78,7 +78,8 @@ def load_task_status_from_db():
                 "pid": row[4],
                 "updated_at": row[5]
             }
-    except Exception:
+    except Exception as e:
+        logging.error(f"Failed to load task status from DB: {e}")
         return TASK_STATUS.copy()
 
 def persist_task_status(status: Dict[str, Any]):
@@ -194,7 +195,14 @@ def run_process_with_logging(cmd, cwd, log_file, task_type):
             CURRENT_TASK_PROCESS = None
         return -1
 
-init_db()
+@app.on_event("startup")
+async def startup_event():
+    try:
+        logging.info("Initializing database...")
+        init_db()
+        logging.info("Database initialized successfully.")
+    except Exception as e:
+        logging.error(f"Database initialization failed: {e}")
 
 @app.exception_handler(HTTPException)
 def http_exception_handler(request: Request, exc: HTTPException):
