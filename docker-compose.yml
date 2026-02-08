@@ -2,13 +2,13 @@ services:
   postgres:
     image: postgres:15-alpine
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: goods
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-goods}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d goods"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-goods}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -18,8 +18,10 @@ services:
   server:
     build: ./server
     environment:
-      DATABASE_URL: postgresql://user:password@postgres:5432/goods
-      # For production, set HEADLESS=true for scraping
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-goods}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-goods}
       HEADLESS: "true"
     depends_on:
       postgres:
@@ -42,7 +44,7 @@ services:
       # If using Nginx/Dokploy, this should be the public domain.
       # For local docker-compose, localhost is fine.
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-      INTERNAL_API_URL: http://server:8000
+      INTERNAL_API_URL: ${INTERNAL_API_URL:-http://server:8000}
     ports:
       - "${WEB_PORT:-3005}:3000"
     networks:
