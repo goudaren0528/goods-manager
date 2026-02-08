@@ -60,11 +60,24 @@ export interface GoodsGroup {
 const isServer = typeof window === 'undefined';
 
 const getClientApiBase = () => {
-  const url = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").trim();
-  if (!isServer && window.location.protocol === 'https:' && url.startsWith('http:')) {
-    return url.replace('http:', 'https:');
+  const raw = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+  const cleaned = raw.replace(/^`|`$/g, "").replace(/^"|"$/g, "").replace(/^'|'$/g, "").trim();
+  if (!cleaned) return "/api";
+  let url = cleaned;
+  if (!isServer && window.location.protocol === "https:" && url.startsWith("http:")) {
+    url = url.replace("http:", "https:");
   }
-  return url;
+  const isAbsolute = /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(url);
+  const isRootRelative = url.startsWith("/");
+  if (isAbsolute || isRootRelative) {
+    const parsed = new URL(url, window.location.origin);
+    const path = parsed.pathname.replace(/\/+$/, "");
+    if (parsed.origin === window.location.origin && (path === "" || path === "/")) {
+      return "/api";
+    }
+    return `${parsed.origin}${path}`;
+  }
+  return url.replace(/\/+$/, "");
 };
 
 export const API_BASE = isServer
