@@ -630,17 +630,19 @@ def merge_scraped_data(scrape_path: str) -> int:
         # Ensure critical columns exist before querying to avoid UndefinedColumn errors
         db.ensure_columns("goods", ["merchant", "商家", "支付宝编码", "是否同步支付宝"])
         
-        placeholders = ",".join([f":id_{i}" for i in range(len(ids))])
-        params = {f"id_{i}": id_val for i, id_val in enumerate(ids)}
-        
-        existing_df = pd.read_sql_query(
-            text(f"SELECT \"ID\", \"merchant\", \"商家\", \"支付宝编码\", \"是否同步支付宝\" FROM goods WHERE \"ID\" IN ({placeholders})"),
-            conn,
-            params=params
-        )
+        chunk_size = 500
         existing_map = {}
-        for _, row in existing_df.fillna("").iterrows():
-            existing_map[str(row["ID"])] = row.to_dict()
+        for start in range(0, len(ids), chunk_size):
+            chunk = ids[start:start + chunk_size]
+            placeholders = ",".join([f":id_{i}" for i in range(len(chunk))])
+            params = {f"id_{i}": id_val for i, id_val in enumerate(chunk)}
+            existing_df = pd.read_sql_query(
+                text(f"SELECT \"ID\", \"merchant\", \"商家\", \"支付宝编码\", \"是否同步支付宝\" FROM goods WHERE \"ID\" IN ({placeholders})"),
+                conn,
+                params=params
+            )
+            for _, row in existing_df.fillna("").iterrows():
+                existing_map[str(row["ID"])] = row.to_dict()
 
         for field in ["merchant", "商家", "支付宝编码", "是否同步支付宝"]:
             if field not in df.columns:
@@ -653,7 +655,11 @@ def merge_scraped_data(scrape_path: str) -> int:
         db.ensure_columns("goods", df.columns.tolist())
         
         # Delete old records
-        conn.execute(text(f"DELETE FROM goods WHERE \"ID\" IN ({placeholders})"), params)
+        for start in range(0, len(ids), chunk_size):
+            chunk = ids[start:start + chunk_size]
+            placeholders = ",".join([f":id_{i}" for i in range(len(chunk))])
+            params = {f"id_{i}": id_val for i, id_val in enumerate(chunk)}
+            conn.execute(text(f"DELETE FROM goods WHERE \"ID\" IN ({placeholders})"), params)
         
         # Insert new records
         # Use chunksize to avoid parameter limit issues if many rows
