@@ -9,7 +9,13 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "goods.db")
 
 # Use DATABASE_URL if set, otherwise default to SQLite
-DATABASE_URL = os.getenv("DATABASE_URL")
+raw_db_url = os.getenv("DATABASE_URL")
+DATABASE_URL = None
+
+if raw_db_url:
+    # Clean up quotes/backticks if present in env var
+    DATABASE_URL = raw_db_url.strip().strip("'").strip('"').strip('`')
+
 if not DATABASE_URL:
     # SQLAlchemy SQLite path requires specific formatting
     # 3 slashes for relative, 4 for absolute (Unix/Mac), or driver specific for Windows

@@ -5,9 +5,10 @@ const nextConfig: NextConfig = {
   output: "standalone",
   reactCompiler: true,
   async rewrites() {
-    const destination = process.env.INTERNAL_API_URL
-      ? `${process.env.INTERNAL_API_URL}/:path*`
-      : "http://server:8000/:path*";
+    const rawUrl = process.env.INTERNAL_API_URL || "http://server:8000";
+    const cleanUrl = rawUrl.replace(/^["'`]|["'`]$/g, "").trim();
+    const destination = `${cleanUrl}/:path*`;
+    
     return {
       afterFiles: [
         { source: "/api/:path*", destination },
