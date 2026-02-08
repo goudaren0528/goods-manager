@@ -32,7 +32,7 @@ app.add_middleware(
 )
 
 # Paths
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # DB_PATH is now managed in db.py
 TASK_LOG_PATH = os.path.join(BASE_DIR, "task.log")
 UPDATE_SCRIPT_PATH = os.path.join(BASE_DIR, "update_goods.py")
