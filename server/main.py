@@ -70,6 +70,12 @@ def init_db():
 def load_task_status_from_db():
     try:
         with db.get_connection() as conn:
+            inspector = sqlalchemy.inspect(conn)
+            if not inspector.has_table("task_status"):
+                db.init_tables()
+                inspector = sqlalchemy.inspect(conn)
+                if not inspector.has_table("task_status"):
+                    return TASK_STATUS.copy()
             row = conn.execute(text("SELECT running, task_name, message, progress, pid, updated_at FROM task_status WHERE id = 1")).fetchone()
             if not row:
                 return TASK_STATUS.copy()
@@ -88,6 +94,12 @@ def load_task_status_from_db():
 def persist_task_status(status: Dict[str, Any]):
     try:
         with db.get_connection() as conn:
+            inspector = sqlalchemy.inspect(conn)
+            if not inspector.has_table("task_status"):
+                db.init_tables()
+                inspector = sqlalchemy.inspect(conn)
+                if not inspector.has_table("task_status"):
+                    return
             conn.execute(
                 text("UPDATE task_status SET running = :running, task_name = :task_name, message = :message, progress = :progress, pid = :pid, updated_at = :updated_at WHERE id = 1"),
                 {
