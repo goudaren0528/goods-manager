@@ -4,6 +4,8 @@ from sqlalchemy import create_engine, text, inspect
 import pandas as pd
 from datetime import datetime
 
+import logging
+
 # Database Configuration
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "goods.db")
@@ -33,43 +35,56 @@ def is_postgres():
     return "postgresql" in str(engine.url)
 
 def init_tables():
-    with engine.connect() as conn:
-        # Task Status Table
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS task_status (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                running INTEGER NOT NULL,
-                task_name TEXT,
-                message TEXT,
-                progress INTEGER,
-                pid INTEGER,
-                updated_at TEXT
-            )
-        """))
-        
-        # Config Table
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS config (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        """))
-        
-        # Initialize task_status if empty
-        # Use dialect-specific UPSERT/IGNORE
-        if is_postgres():
+    logging.info("Checking database tables...")
+    try:
+        with engine.connect() as conn:
+            # Task Status Table
+            logging.info("Creating task_status table if not exists...")
             conn.execute(text("""
-                INSERT INTO task_status (id, running, task_name, message, progress, pid, updated_at) 
-                VALUES (1, 0, NULL, '', 0, NULL, :updated_at)
-                ON CONFLICT (id) DO NOTHING
-            """), {"updated_at": datetime.utcnow().isoformat()})
-        else:
-            conn.execute(text("""
-                INSERT OR IGNORE INTO task_status (id, running, task_name, message, progress, pid, updated_at) 
-                VALUES (1, 0, NULL, '', 0, NULL, :updated_at)
-            """), {"updated_at": datetime.utcnow().isoformat()})
+                CREATE TABLE IF NOT EXISTS task_status (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    running INTEGER NOT NULL,
+                    task_name TEXT,
+                    message TEXT,
+                    progress INTEGER,
+                    pid INTEGER,
+                    updated_at TEXT
+                )
+            """))
             
-        conn.commit()
+            # Config Table
+            logging.info("Creating config table if not exists...")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """))
+            conn.commit()
+            logging.info("Tables created successfully.")
+            
+        with engine.connect() as conn:
+            # Initialize task_status if empty
+            # Use dialect-specific UPSERT/IGNORE
+            logging.info("Initializing default task status...")
+            if is_postgres():
+                conn.execute(text("""
+                    INSERT INTO task_status (id, running, task_name, message, progress, pid, updated_at) 
+                    VALUES (1, 0, NULL, '', 0, NULL, :updated_at)
+                    ON CONFLICT (id) DO NOTHING
+                """), {"updated_at": datetime.utcnow().isoformat()})
+            else:
+                conn.execute(text("""
+                    INSERT OR IGNORE INTO task_status (id, running, task_name, message, progress, pid, updated_at) 
+                    VALUES (1, 0, NULL, '', 0, NULL, :updated_at)
+                    ON CONFLICT(id) DO NOTHING
+                """), {"updated_at": datetime.utcnow().isoformat()})
+                
+            conn.commit()
+            logging.info("Default task status initialized.")
+    except Exception as e:
+        logging.error(f"Error in init_tables: {e}")
+        raise
 
 def ensure_columns(table_name: str, columns: list):
     inspector = inspect(engine)
