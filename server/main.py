@@ -605,6 +605,10 @@ def merge_scraped_data(scrape_path: str) -> int:
             return len(ids)
 
         logging.info("Updating existing records")
+        
+        # Ensure critical columns exist before querying to avoid UndefinedColumn errors
+        db.ensure_columns("goods", ["merchant", "商家", "支付宝编码", "是否同步支付宝"])
+        
         placeholders = ",".join([f":id_{i}" for i in range(len(ids))])
         params = {f"id_{i}": id_val for i, id_val in enumerate(ids)}
         
