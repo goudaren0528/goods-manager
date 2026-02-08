@@ -51,7 +51,7 @@ services:
       - goods_network
 
 volumes:
-  postgres_data:
+  postgres_data_v2:
 
 networks:
   goods_network:
