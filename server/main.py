@@ -487,26 +487,77 @@ def delete_rent_curve(id_or_name: str):
     write_rent_curves(filtered)
     return {"status": "success"}
 
+@app.get("/debug/info")
+def get_debug_info():
+    db_url = os.getenv("DATABASE_URL", "")
+    masked_url = "sqlite" if not db_url else db_url
+    if "://" in db_url:
+        try:
+            scheme, rest = db_url.split("://", 1)
+            if "@" in rest:
+                auth, host = rest.split("@", 1)
+                masked_url = f"{scheme}://***@{host}"
+            else:
+                masked_url = f"{scheme}://{rest}"
+        except:
+            masked_url = "invalid_url_format"
+            
+    goods_count = 0
+    table_exists = False
+    try:
+        with db.get_connection() as conn:
+            inspector = sqlalchemy.inspect(conn)
+            table_exists = inspector.has_table("goods")
+            if table_exists:
+                result = conn.execute(text("SELECT COUNT(*) FROM goods")).fetchone()
+                goods_count = result[0] if result else 0
+    except Exception as e:
+        goods_count = f"Error: {str(e)}"
+
+    scrape_file_exists = os.path.exists(SCRAPE_OUTPUT_FILE)
+    scrape_file_size = os.stat(SCRAPE_OUTPUT_FILE).st_size if scrape_file_exists else 0
+    
+    return {
+        "database_url_masked": masked_url,
+        "is_postgres": db.is_postgres(),
+        "goods_table_exists": table_exists,
+        "goods_count": goods_count,
+        "scrape_file_path": SCRAPE_OUTPUT_FILE,
+        "scrape_file_exists": scrape_file_exists,
+        "scrape_file_size": scrape_file_size,
+        "cwd": os.getcwd(),
+        "base_dir": BASE_DIR,
+        "env_database_url_present": bool(db_url)
+    }
+
 def merge_scraped_data(scrape_path: str) -> int:
     if not os.path.exists(scrape_path):
         raise HTTPException(status_code=400, detail="Scrape data file not found")
+    
+    logging.info(f"Starting merge from {scrape_path}")
+    
     with open(scrape_path, "r", encoding="utf-8") as f:
         items = json.load(f)
     if not items:
+        logging.info("No items in scrape file")
         return 0
     df = pd.DataFrame(items).fillna("")
     if "ID" not in df.columns:
         raise HTTPException(status_code=400, detail="Scrape data missing ID")
     df["ID"] = df["ID"].astype(str)
     ids = df["ID"].unique().tolist()
+    
+    logging.info(f"Found {len(ids)} unique items to merge")
 
     with db.get_connection() as conn:
         # Check if table exists
         inspector = sqlalchemy.inspect(conn)
         if not inspector.has_table("goods"):
+            logging.info("Creating goods table")
             df.to_sql("goods", conn, if_exists="append", index=False)
             return len(ids)
 
+        logging.info("Updating existing records")
         placeholders = ",".join([f":id_{i}" for i in range(len(ids))])
         params = {f"id_{i}": id_val for i, id_val in enumerate(ids)}
         
