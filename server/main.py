@@ -601,6 +601,7 @@ def merge_scraped_data(scrape_path: str) -> int:
         if not inspector.has_table("goods"):
             logging.info("Creating goods table")
             df.to_sql("goods", conn, if_exists="append", index=False)
+            conn.commit()
             return len(ids)
 
         logging.info("Updating existing records")
