@@ -7,3 +7,4 @@ scrape_goods_data_*.xlsx
 my-app/
 venv/
 server/venv/
+*.log

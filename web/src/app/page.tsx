@@ -181,7 +181,7 @@ export default function Home() {
   // 过滤功能状态
   const [filterKeywords, setFilterKeywords] = useState("已出租,下架,不可租");
   const [isFilterEnabled, setIsFilterEnabled] = useState(true);
-  const [merchantFilter, setMerchantFilter] = useState("米奇");
+  const [merchantFilter, setMerchantFilter] = useState("all");
   const [syncStatusFilter, setSyncStatusFilter] = useState("all");
   const [productFilter, setProductFilter] = useState("全部");
 

@@ -430,7 +430,7 @@ def get_config_map():
         data = {row[0]: row[1] for row in rows}
         defaults = {
             "filter_keywords": "已出租,下架,不可租",
-            "default_merchant_filter": "米奇"
+            "default_merchant_filter": "all"
         }
         for k, v in defaults.items():
             data.setdefault(k, v)
