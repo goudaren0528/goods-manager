@@ -61,8 +61,11 @@ TASK_LOCK = threading.Lock()
 
 logging.basicConfig(filename=TASK_LOG_PATH, level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+DB_STATUS = {"connected": False, "error": None}
+
 def init_db():
     db.init_tables()
+
 
 def load_task_status_from_db():
     try:
@@ -200,9 +203,15 @@ async def startup_event():
     try:
         logging.info("Initializing database...")
         init_db()
+        DB_STATUS["connected"] = True
         logging.info("Database initialized successfully.")
     except Exception as e:
+        DB_STATUS["error"] = str(e)
         logging.error(f"Database initialization failed: {e}")
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "db": DB_STATUS}
 
 @app.exception_handler(HTTPException)
 def http_exception_handler(request: Request, exc: HTTPException):

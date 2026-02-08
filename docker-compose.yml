@@ -24,8 +24,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-goods}
       HEADLESS: "true"
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
     volumes:
       - ./server/data:/app/data
     ports:
