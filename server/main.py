@@ -65,33 +65,55 @@ def init_db():
     db.init_tables()
 
 def load_task_status_from_db():
-    with db.get_connection() as conn:
-        row = conn.execute(text("SELECT running, task_name, message, progress, pid, updated_at FROM task_status WHERE id = 1")).fetchone()
-        if not row:
-            return TASK_STATUS.copy()
-        return {
-            "running": bool(row[0]),
-            "task_name": row[1],
-            "message": row[2] or "",
-            "progress": row[3] or 0,
-            "pid": row[4],
-            "updated_at": row[5]
-        }
+    try:
+        with db.get_connection() as conn:
+            row = conn.execute(text("SELECT running, task_name, message, progress, pid, updated_at FROM task_status WHERE id = 1")).fetchone()
+            if not row:
+                return TASK_STATUS.copy()
+            return {
+                "running": bool(row[0]),
+                "task_name": row[1],
+                "message": row[2] or "",
+                "progress": row[3] or 0,
+                "pid": row[4],
+                "updated_at": row[5]
+            }
+    except Exception:
+        return TASK_STATUS.copy()
 
 def persist_task_status(status: Dict[str, Any]):
-    with db.get_connection() as conn:
-        conn.execute(
-            text("UPDATE task_status SET running = :running, task_name = :task_name, message = :message, progress = :progress, pid = :pid, updated_at = :updated_at WHERE id = 1"),
-            {
-                "running": 1 if status["running"] else 0,
-                "task_name": status.get("task_name"),
-                "message": status.get("message"),
-                "progress": status.get("progress"),
-                "pid": status.get("pid"),
-                "updated_at": status.get("updated_at")
-            }
-        )
-        conn.commit()
+    try:
+        with db.get_connection() as conn:
+            conn.execute(
+                text("UPDATE task_status SET running = :running, task_name = :task_name, message = :message, progress = :progress, pid = :pid, updated_at = :updated_at WHERE id = 1"),
+                {
+                    "running": 1 if status["running"] else 0,
+                    "task_name": status.get("task_name"),
+                    "message": status.get("message"),
+                    "progress": status.get("progress"),
+                    "pid": status.get("pid"),
+                    "updated_at": status.get("updated_at")
+                }
+            )
+            conn.commit()
+    except Exception:
+        try:
+            db.init_tables()
+            with db.get_connection() as conn:
+                conn.execute(
+                    text("UPDATE task_status SET running = :running, task_name = :task_name, message = :message, progress = :progress, pid = :pid, updated_at = :updated_at WHERE id = 1"),
+                    {
+                        "running": 1 if status["running"] else 0,
+                        "task_name": status.get("task_name"),
+                        "message": status.get("message"),
+                        "progress": status.get("progress"),
+                        "pid": status.get("pid"),
+                        "updated_at": status.get("updated_at")
+                    }
+                )
+                conn.commit()
+        except Exception:
+            pass
 
 def update_task_status(running, task_name, message, progress, pid=None):
     with TASK_LOCK:
@@ -102,7 +124,10 @@ def update_task_status(running, task_name, message, progress, pid=None):
         if pid is not None:
             TASK_STATUS["pid"] = pid
         TASK_STATUS["updated_at"] = datetime.utcnow().isoformat()
-        persist_task_status(TASK_STATUS)
+        try:
+            persist_task_status(TASK_STATUS)
+        except Exception:
+            pass
 
 def run_process_with_logging(cmd, cwd, log_file, task_type):
     global CURRENT_TASK_PROCESS
