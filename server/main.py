@@ -216,6 +216,8 @@ def unhandled_exception_handler(request: Request, exc: Exception):
 
 # --- Goods Endpoints ---
 
+import traceback
+
 @app.get("/goods")
 def get_goods(
     page: int = 1,
@@ -348,7 +350,10 @@ def get_goods(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = str(e)
+        logging.error(f"Error in get_goods: {error_msg}")
+        logging.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to fetch goods: {error_msg}")
 
 class UpdateFieldRequest(BaseModel):
     field: str
