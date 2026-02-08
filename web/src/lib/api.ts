@@ -58,9 +58,19 @@ export interface GoodsGroup {
 }
 
 const isServer = typeof window === 'undefined';
+
+const getClientApiBase = () => {
+  const url = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  // If running in browser and URL is relative or HTTP but page is HTTPS, upgrade to HTTPS if needed
+  if (!isServer && window.location.protocol === 'https:' && url.startsWith('http:')) {
+    return url.replace('http:', 'https:');
+  }
+  return url;
+};
+
 export const API_BASE = isServer
   ? (process.env.INTERNAL_API_URL || "http://server:8000")
-  : (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000");
+  : getClientApiBase();
 export const EXPORT_URL = `${API_BASE}/export-excel`;
 
 export interface FetchGoodsResponse {
