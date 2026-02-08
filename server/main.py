@@ -504,13 +504,19 @@ def get_debug_info():
             
     goods_count = 0
     table_exists = False
+    table_names = []
+    current_database = None
     try:
         with db.get_connection() as conn:
             inspector = sqlalchemy.inspect(conn)
+            table_names = inspector.get_table_names()
             table_exists = inspector.has_table("goods")
             if table_exists:
                 result = conn.execute(text("SELECT COUNT(*) FROM goods")).fetchone()
                 goods_count = result[0] if result else 0
+            if db.is_postgres():
+                db_row = conn.execute(text("SELECT current_database()")).fetchone()
+                current_database = db_row[0] if db_row else None
     except Exception as e:
         goods_count = f"Error: {str(e)}"
 
@@ -522,6 +528,8 @@ def get_debug_info():
         "is_postgres": db.is_postgres(),
         "goods_table_exists": table_exists,
         "goods_count": goods_count,
+        "table_names": table_names,
+        "current_database": current_database,
         "scrape_file_path": SCRAPE_OUTPUT_FILE,
         "scrape_file_exists": scrape_file_exists,
         "scrape_file_size": scrape_file_size,
