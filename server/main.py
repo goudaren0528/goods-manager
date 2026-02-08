@@ -207,6 +207,10 @@ def get_goods(
         where_sql = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
         with db.get_connection() as conn:
+            inspector = sqlalchemy.inspect(conn)
+            if not inspector.has_table("goods"):
+                return {"data": [], "total": 0, "page": page, "limit": limit, "total_pages": 0}
+
             total_row = conn.execute(text(f"SELECT COUNT(DISTINCT ID) FROM goods{where_sql}"), params).fetchone()
             total = total_row[0] if total_row else 0
             if total == 0:
@@ -317,6 +321,10 @@ def update_goods_field(id: str, req: UpdateFieldRequest):
             raise HTTPException(status_code=400, detail=f"Field {req.field} not allowed")
             
         with db.get_connection() as conn:
+            inspector = sqlalchemy.inspect(conn)
+            if not inspector.has_table("goods"):
+                raise HTTPException(status_code=404, detail="Item not found (Table missing)")
+
             # Use quotes for field name to handle potential keywords or special chars
             result = conn.execute(
                 text(f"UPDATE goods SET \"{req.field}\" = :value WHERE ID = :id"),
@@ -335,6 +343,10 @@ class UpdateMerchantRequest(BaseModel):
 @app.post("/goods/{id}/merchant")
 def update_goods_merchant(id: str, req: UpdateMerchantRequest):
     with db.get_connection() as conn:
+        inspector = sqlalchemy.inspect(conn)
+        if not inspector.has_table("goods"):
+            raise HTTPException(status_code=404, detail="Item not found (Table missing)")
+
         result = conn.execute(
             text("UPDATE goods SET merchant = :merchant, 商家 = :merchant WHERE ID = :id"),
             {"merchant": req.merchant, "id": id}
@@ -347,6 +359,10 @@ def update_goods_merchant(id: str, req: UpdateMerchantRequest):
 @app.delete("/goods/{id}")
 def delete_goods(id: str):
     with db.get_connection() as conn:
+        inspector = sqlalchemy.inspect(conn)
+        if not inspector.has_table("goods"):
+            raise HTTPException(status_code=404, detail="Item not found (Table missing)")
+
         result = conn.execute(text("DELETE FROM goods WHERE ID = :id"), {"id": id})
         conn.commit()
         if result.rowcount == 0:
@@ -579,7 +595,11 @@ def export_excel(
         where_sql = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
         
         with db.get_connection() as conn:
-            df = pd.read_sql_query(text(f"SELECT * FROM goods{where_sql} ORDER BY ID DESC"), conn, params=params)
+            inspector = sqlalchemy.inspect(conn)
+            if not inspector.has_table("goods"):
+                df = pd.DataFrame()
+            else:
+                df = pd.read_sql_query(text(f"SELECT * FROM goods{where_sql} ORDER BY ID DESC"), conn, params=params)
         
         df = df.fillna("")
         output = io.BytesIO()
@@ -645,6 +665,10 @@ def start_alipay_update(req: AutomationRequest):
     # 1. Prepare Data
     try:
         with db.get_connection() as conn:
+            inspector = sqlalchemy.inspect(conn)
+            if not inspector.has_table("goods"):
+                 raise Exception("Table 'goods' not found. Please scrape data first.")
+
             placeholders = ",".join([f":id_{i}" for i in range(len(req.ids))])
             params = {f"id_{i}": id_val for i, id_val in enumerate(req.ids)}
             
