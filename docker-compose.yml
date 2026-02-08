@@ -32,13 +32,17 @@ services:
       - goods_network
 
   web:
-    build: ./web
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     environment:
       # In Docker network, server is at http://server:8000
       # BUT for client-side fetches, we need the public URL.
       # If using Nginx/Dokploy, this should be the public domain.
       # For local docker-compose, localhost is fine.
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      INTERNAL_API_URL: http://server:8000
     ports:
       - "${WEB_PORT:-3005}:3000"
     networks:

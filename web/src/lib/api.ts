@@ -57,7 +57,10 @@ export interface GoodsGroup {
   支付宝编码?: string;
 }
 
-export const API_BASE = "http://127.0.0.1:8000";
+const isServer = typeof window === 'undefined';
+export const API_BASE = isServer
+  ? (process.env.INTERNAL_API_URL || "http://server:8000")
+  : (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000");
 export const EXPORT_URL = `${API_BASE}/export-excel`;
 
 export interface FetchGoodsResponse {
