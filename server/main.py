@@ -204,13 +204,13 @@ def get_goods(
         params = {}
         where_clauses = []
         if search:
-            where_clauses.append("(商品名称 LIKE :search OR SKU LIKE :search OR ID LIKE :search)")
+            where_clauses.append("(\"商品名称\" LIKE :search OR \"SKU\" LIKE :search OR \"ID\" LIKE :search)")
             params["search"] = f"%{search}%"
         if merchant and merchant != "all":
-            where_clauses.append("(merchant = :merchant OR 商家 = :merchant)")
+            where_clauses.append("(\"merchant\" = :merchant OR \"商家\" = :merchant)")
             params["merchant"] = merchant
         if sync_status and sync_status != "all":
-            where_clauses.append("是否同步支付宝 = :sync_status")
+            where_clauses.append("\"是否同步支付宝\" = :sync_status")
             params["sync_status"] = sync_status
         where_sql = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
@@ -219,7 +219,7 @@ def get_goods(
             if not inspector.has_table("goods"):
                 return {"data": [], "total": 0, "page": page, "limit": limit, "total_pages": 0}
 
-            total_row = conn.execute(text(f"SELECT COUNT(DISTINCT ID) FROM goods{where_sql}"), params).fetchone()
+            total_row = conn.execute(text(f"SELECT COUNT(DISTINCT \"ID\") FROM goods{where_sql}"), params).fetchone()
             total = total_row[0] if total_row else 0
             if total == 0:
                 return {"data": [], "total": 0, "page": page, "limit": limit, "total_pages": 0}
@@ -230,31 +230,31 @@ def get_goods(
             sort_expr = ""
             if sort_field == "ID" or not sort_field:
                 if db.is_postgres():
-                    sort_expr = "CASE WHEN ID ~ '^[0-9]+' THEN CAST(ID AS INTEGER) ELSE NULL END"
+                    sort_expr = "CASE WHEN \"ID\" ~ '^[0-9]+' THEN CAST(\"ID\" AS INTEGER) ELSE NULL END"
                 else:
-                    sort_expr = "CASE WHEN ID GLOB '[0-9]*' THEN CAST(ID AS INTEGER) ELSE NULL END"
+                    sort_expr = "CASE WHEN \"ID\" GLOB '[0-9]*' THEN CAST(\"ID\" AS INTEGER) ELSE NULL END"
             elif sort_field == "商品名称":
-                sort_expr = "MIN(商品名称)"
+                sort_expr = "MIN(\"商品名称\")"
             elif sort_field == "1天租金":
                 sort_expr = "MIN(CASE WHEN NULLIF(\"1天租金\", '') IS NULL THEN NULL ELSE CAST(\"1天租金\" AS REAL) END)"
             elif sort_field == "支付宝编码":
-                sort_expr = "MIN(支付宝编码)"
+                sort_expr = "MIN(\"支付宝编码\")"
             elif sort_field == "最近提交时间":
                 sort_expr = "MIN(NULLIF(\"最近提交时间\", ''))"
             elif sort_field == "merchant":
-                sort_expr = "MIN(merchant)"
+                sort_expr = "MIN(\"merchant\")"
             else:
                 if db.is_postgres():
-                    sort_expr = "CASE WHEN ID ~ '^[0-9]+' THEN CAST(ID AS INTEGER) ELSE NULL END"
+                    sort_expr = "CASE WHEN \"ID\" ~ '^[0-9]+' THEN CAST(\"ID\" AS INTEGER) ELSE NULL END"
                 else:
-                    sort_expr = "CASE WHEN ID GLOB '[0-9]*' THEN CAST(ID AS INTEGER) ELSE NULL END"
+                    sort_expr = "CASE WHEN \"ID\" GLOB '[0-9]*' THEN CAST(\"ID\" AS INTEGER) ELSE NULL END"
 
             id_query = f"""
-                SELECT ID, {sort_expr} AS sort_value
+                SELECT \"ID\", {sort_expr} AS sort_value
                 FROM goods
                 {where_sql}
-                GROUP BY ID
-                ORDER BY (sort_value IS NULL) ASC, sort_value {order}, ID {order}
+                GROUP BY \"ID\"
+                ORDER BY (sort_value IS NULL) ASC, sort_value {order}, \"ID\" {order}
             """
             
             id_params = params.copy()
@@ -277,7 +277,7 @@ def get_goods(
             # We don't need other params here since we are selecting by ID only
             
             df = pd.read_sql_query(
-                text(f"SELECT * FROM goods WHERE ID IN ({placeholders})"),
+                text(f"SELECT * FROM goods WHERE \"ID\" IN ({placeholders})"),
                 conn,
                 params=in_params
             )
@@ -335,7 +335,7 @@ def update_goods_field(id: str, req: UpdateFieldRequest):
 
             # Use quotes for field name to handle potential keywords or special chars
             result = conn.execute(
-                text(f"UPDATE goods SET \"{req.field}\" = :value WHERE ID = :id"),
+                text(f"UPDATE goods SET \"{req.field}\" = :value WHERE \"ID\" = :id"),
                 {"value": req.value, "id": id}
             )
             conn.commit()
@@ -356,7 +356,7 @@ def update_goods_merchant(id: str, req: UpdateMerchantRequest):
             raise HTTPException(status_code=404, detail="Item not found (Table missing)")
 
         result = conn.execute(
-            text("UPDATE goods SET merchant = :merchant, 商家 = :merchant WHERE ID = :id"),
+            text("UPDATE goods SET \"merchant\" = :merchant, \"商家\" = :merchant WHERE \"ID\" = :id"),
             {"merchant": req.merchant, "id": id}
         )
         conn.commit()
@@ -371,7 +371,7 @@ def delete_goods(id: str):
         if not inspector.has_table("goods"):
             raise HTTPException(status_code=404, detail="Item not found (Table missing)")
 
-        result = conn.execute(text("DELETE FROM goods WHERE ID = :id"), {"id": id})
+        result = conn.execute(text("DELETE FROM goods WHERE \"ID\" = :id"), {"id": id})
         conn.commit()
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="Item not found")
@@ -562,7 +562,7 @@ def merge_scraped_data(scrape_path: str) -> int:
         params = {f"id_{i}": id_val for i, id_val in enumerate(ids)}
         
         existing_df = pd.read_sql_query(
-            text(f"SELECT ID, merchant, 商家, 支付宝编码, 是否同步支付宝 FROM goods WHERE ID IN ({placeholders})"),
+            text(f"SELECT \"ID\", \"merchant\", \"商家\", \"支付宝编码\", \"是否同步支付宝\" FROM goods WHERE \"ID\" IN ({placeholders})"),
             conn,
             params=params
         )
@@ -581,7 +581,7 @@ def merge_scraped_data(scrape_path: str) -> int:
         db.ensure_columns("goods", df.columns.tolist())
         
         # Delete old records
-        conn.execute(text(f"DELETE FROM goods WHERE ID IN ({placeholders})"), params)
+        conn.execute(text(f"DELETE FROM goods WHERE \"ID\" IN ({placeholders})"), params)
         
         # Insert new records
         # Use chunksize to avoid parameter limit issues if many rows
@@ -647,13 +647,13 @@ def export_excel(
         params = {}
         where_clauses = []
         if search:
-            where_clauses.append("(商品名称 LIKE :search OR SKU LIKE :search OR ID LIKE :search)")
+            where_clauses.append("(\"商品名称\" LIKE :search OR \"SKU\" LIKE :search OR \"ID\" LIKE :search)")
             params["search"] = f"%{search}%"
         if merchant and merchant != "all":
-            where_clauses.append("(merchant = :merchant OR 商家 = :merchant)")
+            where_clauses.append("(\"merchant\" = :merchant OR \"商家\" = :merchant)")
             params["merchant"] = merchant
         if sync_status and sync_status != "all":
-            where_clauses.append("是否同步支付宝 = :sync_status")
+            where_clauses.append("\"是否同步支付宝\" = :sync_status")
             params["sync_status"] = sync_status
         where_sql = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
         
@@ -662,7 +662,7 @@ def export_excel(
             if not inspector.has_table("goods"):
                 df = pd.DataFrame()
             else:
-                df = pd.read_sql_query(text(f"SELECT * FROM goods{where_sql} ORDER BY ID DESC"), conn, params=params)
+                df = pd.read_sql_query(text(f"SELECT * FROM goods{where_sql} ORDER BY \"ID\" DESC"), conn, params=params)
         
         df = df.fillna("")
         output = io.BytesIO()
@@ -735,7 +735,7 @@ def start_alipay_update(req: AutomationRequest):
             placeholders = ",".join([f":id_{i}" for i in range(len(req.ids))])
             params = {f"id_{i}": id_val for i, id_val in enumerate(req.ids)}
             
-            query = f"SELECT ID, 支付宝编码 FROM goods WHERE ID IN ({placeholders})"
+            query = f"SELECT \"ID\", \"支付宝编码\" FROM goods WHERE \"ID\" IN ({placeholders})"
             df = pd.read_sql_query(text(query), conn, params=params)
         
         items = []
