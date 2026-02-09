@@ -93,6 +93,32 @@ const getServerApiBase = () => {
 export const API_BASE = isServer ? getServerApiBase() : getClientApiBase();
 export const EXPORT_URL = `${API_BASE}/export-excel`;
 
+const parseJsonResponse = async <T>(res: Response, fallbackPath: string, errorMessage: string): Promise<T> => {
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    const text = await res.text();
+    if (!isServer && fallbackPath && API_BASE !== "/api") {
+      const retry = await fetch(`/api${fallbackPath}`, { cache: "no-store" });
+      const retryContentType = retry.headers.get("content-type") || "";
+      if (retryContentType.includes("application/json")) {
+        if (!retry.ok) {
+          const err = await retry.json().catch(() => null);
+          throw new Error((err as { message?: string } | null)?.message || errorMessage);
+        }
+        return retry.json();
+      }
+      const retryText = await retry.text();
+      throw new Error(`${errorMessage}: ${retry.status} ${retryText.slice(0, 200)}`);
+    }
+    throw new Error(`${errorMessage}: ${res.status} ${text.slice(0, 200)}`);
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error((err as { message?: string } | null)?.message || errorMessage);
+  }
+  return res.json();
+};
+
 export interface FetchGoodsResponse {
   data: GoodsGroup[];
   total: number;
@@ -112,9 +138,9 @@ export async function fetchGoods(page: number, limit: number, allData = false, m
   if (sortBy) params.append("sort_by", sortBy);
   if (sortDesc !== undefined) params.append("sort_desc", sortDesc ? "true" : "false");
 
-  const res = await fetch(`${API_BASE}/goods?${params.toString()}`, { cache: 'no-store' });
-  if (!res.ok) throw new Error("Failed to fetch goods");
-  return res.json();
+  const path = `/goods?${params.toString()}`;
+  const res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
+  return parseJsonResponse<FetchGoodsResponse>(res, path, "Failed to fetch goods");
 }
 
 export const runScrape = async (): Promise<Record<string, unknown>> => {
@@ -184,11 +210,9 @@ export const fetchLogs = async (): Promise<{ logs: string }> => {
 };
 
 export const fetchTaskStatus = async (): Promise<{ running: boolean; task_name: string | null; message: string; progress: number; last_updated?: string }> => {
-  const res = await fetch(`${API_BASE}/task-status`, { cache: 'no-store' });
-  if (!res.ok) {
-    throw new Error("Failed to fetch task status");
-  }
-  return res.json();
+  const path = "/task-status";
+  const res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
+  return parseJsonResponse(res, path, "Failed to fetch task status");
 };
 
 export async function stopTask() {
