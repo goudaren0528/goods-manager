@@ -26,7 +26,11 @@ if not DATABASE_URL:
 
 print(f"Connecting to database: {DATABASE_URL}")
 
-engine = create_engine(DATABASE_URL)
+connect_args = {}
+if "postgresql" in str(DATABASE_URL):
+    connect_args["connect_timeout"] = 5
+
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 
 def get_connection():
     return engine.connect()

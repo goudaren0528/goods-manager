@@ -59,7 +59,14 @@ TASK_STATUS = {
 CURRENT_TASK_PROCESS = None
 TASK_LOCK = threading.Lock()
 
-logging.basicConfig(filename=TASK_LOG_PATH, level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[
+        logging.FileHandler(TASK_LOG_PATH, encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 
 DB_STATUS = {"connected": False, "error": None}
 
