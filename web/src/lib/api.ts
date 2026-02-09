@@ -33,15 +33,45 @@ export interface GoodsGroup {
   支付宝编码?: string;
 }
 
+type ApiErrorShape = {
+  status?: string;
+  message?: string;
+};
+
 const isServer = typeof window === 'undefined';
 
 const cleanEnvUrl = (value: string) => value.replace(/^`|`$/g, "").replace(/^"|"$/g, "").replace(/^'|'$/g, "").trim();
+
+const getErrorMessage = (data: unknown): string | undefined => {
+  if (data && typeof data === "object") {
+    const candidate = data as ApiErrorShape;
+    if (typeof candidate.message === "string") {
+      return candidate.message;
+    }
+  }
+  return undefined;
+};
+
+const hasErrorStatus = (data: unknown): boolean => {
+  if (data && typeof data === "object") {
+    const candidate = data as ApiErrorShape;
+    return candidate.status === "error";
+  }
+  return false;
+};
 
 const getClientApiBase = () => {
   const raw = (process.env.NEXT_PUBLIC_API_URL || "").trim();
   const cleaned = cleanEnvUrl(raw);
   if (!cleaned) return "/api";
   let url = cleaned;
+  if (!isServer) {
+    const host = window.location.hostname;
+    const isLocalHost = host === "localhost" || host === "127.0.0.1";
+    if (!isLocalHost && (url.includes("localhost") || url.includes("127.0.0.1"))) {
+      return "/api";
+    }
+  }
   if (!isServer && window.location.protocol === "https:" && url.startsWith("http:")) {
     url = url.replace("http:", "https:");
   }
@@ -82,8 +112,8 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}, errorMes
       console.warn(`Fetch failed for ${url}, trying fallback to /api${endpoint}`);
       try {
         res = await fetch(`/api${endpoint}`, options);
-      } catch (fallbackError) {
-        throw e; // Original error likely more relevant
+      } catch {
+        throw e;
       }
     } else {
       throw e;
@@ -127,27 +157,29 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}, errorMes
   }
 
   // Parse JSON
-  let data: any;
+  let data: unknown;
   try {
     data = JSON.parse(text);
-  } catch (e) {
+  } catch {
     throw new Error(`${errorMessage}: Failed to parse JSON response`);
   }
 
   if (!res.ok) {
     // If error response has a specific structure with 'status': 'error', handle it
-    if (data && typeof data === 'object' && data.status === 'error' && data.message) {
-        throw new Error(data.message);
+    const message = getErrorMessage(data);
+    if (hasErrorStatus(data) && message) {
+      throw new Error(message);
     }
-    throw new Error(data.message || errorMessage);
+    throw new Error(message || errorMessage);
   }
   
   // Also check for { status: "error" } in success responses (legacy API style)
-  if (data && typeof data === 'object' && data.status === 'error') {
-      throw new Error(data.message || errorMessage);
+  if (hasErrorStatus(data)) {
+    const message = getErrorMessage(data);
+    throw new Error(message || errorMessage);
   }
 
-  return data;
+  return data as T;
 }
 
 export async function fetchRentCurves(): Promise<RentCurve[]> {
